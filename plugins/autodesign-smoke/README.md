@@ -1,4 +1,4 @@
-# Codex to Figma Smoke Plugin
+# AutoDesign Smoke Plugin
 
 这个目录只用于验证 Figma Desktop 是否真正加载了当前构建产物。
 
@@ -20,8 +20,8 @@ npm run build:plugins
 
 导入路径：
 
-- `/Users/hirohi/Figmatest/plugins/codex-to-figma-smoke/dist/manifest.json`
+- `/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json`
 
 插件名称：
 
-- `Figmatest Smoke Dist v1`
+- `AutoDesign Smoke`

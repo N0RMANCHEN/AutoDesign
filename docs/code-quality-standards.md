@@ -1,6 +1,6 @@
 # 代码与文档质量标准
 
-本文档定义 Figmatest 当前阶段的质量门槛。仓库现在同时包含 Markdown、Vite + React 工作台、本地 Node API 和独立 Figma 插件，因此文档质量、Prompt 契约质量和代码质量都要一起看。
+本文档定义 AutoDesign 当前阶段的质量门槛。仓库现在同时包含 Markdown、Vite + React 工作台、本地 Node API 和独立 Figma 插件，因此文档质量、Prompt 契约质量和代码质量都要一起看。
 
 ## 1. Markdown 文档质量
 
@@ -18,7 +18,7 @@
 
 ### 1.3 命名统一
 
-- 项目名统一为 `Figmatest`
+- 项目名统一为 `AutoDesign`
 - 协作主文档统一引用 `AGENT.md`
 - 术语首次出现时给出中文解释，字段名保留英文
 
@@ -70,8 +70,8 @@
 ## 5. 推荐检查方式
 
 ```bash
-rg -n "Celest|Figmatest Command Bridge Dist v1|Command Bridge" -g '*.md'
-rg -n "AGENT\\.md|Figmatest_Project_Map\\.md" -g '*.md'
+rg -n "AutoDesign|autodesign|AutoDesign_Project_Map" -g '*.md'
+rg -n "AGENT\\.md|AutoDesign_Project_Map\\.md" -g '*.md'
 find . -type f -name '*.md' | sort
 ```
 

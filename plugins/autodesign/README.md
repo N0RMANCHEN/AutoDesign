@@ -1,4 +1,4 @@
-# Codex to Figma Plugin
+# AutoDesign Plugin
 
 这个目录是正式的 Figma 执行器源码包。
 
@@ -37,8 +37,9 @@ npm run plugin:preview
 
 导入路径：
 
-- `/Users/hirohi/Figmatest/plugins/codex-to-figma/dist/manifest.json`
+- `/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json`
 
 插件名称：
 
-- `Codex to Figma`
+- `AutoDesign`
+

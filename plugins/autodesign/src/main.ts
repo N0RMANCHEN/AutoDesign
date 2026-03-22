@@ -3,7 +3,7 @@ import type { FigmaPluginCommandBatch } from "../../../shared/plugin-contract.js
 import { runPluginCommandBatch, getRuntimeCapabilities } from "./runtime/capability-runner.js";
 import { currentSelectionUiPayload } from "./runtime/selection-context.js";
 
-const PLUGIN_LABEL = "Codex to Figma";
+const PLUGIN_LABEL = "AutoDesign";
 const PLUGIN_VERSION = "0.2.0";
 const BRIDGE_URL = "http://localhost:3001/api/plugin-bridge";
 const UI_WIDTH = 252;

@@ -1,8 +1,8 @@
-# Runtime AI（设计联调助手）
+# Runtime AI（AutoDesign 设计联调助手）
 
 ## 作用
 
-Runtime AI 用于 Figmatest 的设计联调场景，负责消费一份结构化 `Context Pack`，然后返回可审阅的结构化结果。
+Runtime AI 用于 AutoDesign 的设计联调场景，负责消费一份结构化 `Context Pack`，然后返回可审阅的结构化结果。
 
 它适合处理的任务包括：
 

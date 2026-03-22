@@ -1,6 +1,6 @@
-# Figmatest AI 文档说明
+# AutoDesign AI 文档说明
 
-本目录保存当前仓库的 AI 运行时设计文档。
+本目录保存 AutoDesign 当前仓库的 AI 运行时设计文档。
 
 目标不是描述“已经上线的 AI 产品能力”，而是提前定义：
 

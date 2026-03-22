@@ -1,6 +1,6 @@
-# Codex to Figma
+# AutoDesign
 
-`Codex to Figma` 是一个面向个人工作流的 Figma + 前端联调仓库，解决两件事：
+`AutoDesign` 是一个面向个人工作流的 Figma + 前端联调仓库，解决两件事：
 
 1. **用 Codex / Claude 直接调整 Figma**
    通过本地 Figma 插件和 bridge，让 AI 读取当前选中节点、查看图片预览，并执行颜色、样式、变量等写操作。
@@ -50,7 +50,7 @@
   `src/` + `server/`
   负责 Figma to React 这一侧的上下文整理、映射、运行时验证
 - **Plugin**
-  `plugins/codex-to-figma/`
+  `plugins/autodesign/`
   负责 Codex / Claude to Figma 这一侧的实际执行
 - **Bridge**
   `server/index.ts` + `server/plugin-bridge-store.ts`
@@ -94,11 +94,11 @@ npm run build:plugins
 
 正式插件导入路径：
 
-- [manifest.json](/Users/hirohi/Figmatest/plugins/codex-to-figma/dist/manifest.json)
+- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
 
 Smoke 插件导入路径：
 
-- [manifest.json](/Users/hirohi/Figmatest/plugins/codex-to-figma-smoke/dist/manifest.json)
+- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
 
 ### 5. 在 Figma Desktop 导入插件
 
@@ -106,8 +106,8 @@ Smoke 插件导入路径：
 2. `Plugins` -> `Development` -> `Import plugin from manifest...`
 3. 先选择 smoke 插件的 `dist/manifest.json`
 4. 验证 smoke 插件能正常运行
-5. 再导入正式插件 [manifest.json](/Users/hirohi/Figmatest/plugins/codex-to-figma/dist/manifest.json)
-6. 运行 `Codex to Figma`
+5. 再导入正式插件 [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
+6. 运行 `AutoDesign`
 
 > 只导入 `dist/manifest.json`，不要直接导入 `src/`
 
@@ -116,7 +116,7 @@ Smoke 插件导入路径：
 ### 工作流 1：让 AI 直接改 Figma
 
 1. 启动本地服务：`npm run dev`
-2. 在 Figma 打开 `Codex to Figma`
+2. 在 Figma 打开 `AutoDesign`
 3. 在 Figma 里选中你要处理的节点
 4. 让 Codex / Claude 发插件命令
 
@@ -219,40 +219,95 @@ npm run plugin:preview
 - Desktop MCP
 - 发布库 / 更完整团队协作
 
-就会进入付费计划边界。
+那就要单独看 seat 和计划限制。
 
-## 目录导航
+## 用户侧怎么配置
 
-```text
-.
-├─ src/                 # Vite + React workspace
-├─ server/              # local Node API + bridge
-├─ shared/              # shared types, capability registry, contracts
-├─ plugins/             # Figma plugins
-├─ data/                # local JSON data
-└─ docs/                # architecture and AI docs
-```
+### 必装
 
-重点文档：
+- Node.js 18+
+- npm
+- Figma Desktop
 
-- [AGENT.md](/Users/hirohi/Figmatest/AGENT.md)
-- [docs/architecture.md](/Users/hirohi/Figmatest/docs/architecture.md)
-- [docs/Figmatest_Project_Map.md](/Users/hirohi/Figmatest/docs/Figmatest_Project_Map.md)
-- [plugins/codex-to-figma/README.md](/Users/hirohi/Figmatest/plugins/codex-to-figma/README.md)
-
-## 常用命令
+### 本地服务
 
 ```bash
 npm run dev
-npm run build
-npm run build:plugins
-npm run typecheck
-npm run plugin:status
-npm run plugin:send -- --prompt "把当前选中对象改成蓝色"
-npm run plugin:preview
 ```
 
-## 当前仓库状态说明
+### 正式插件导入文件
 
-这个仓库已经能跑通“AI 调 Figma”的最小闭环，也已经能为“Figma 驱动 React 改造”提供本地上下文底座。  
-它现在最适合的使用方式是：**个人工作流、单机本地、AI 协同设计与前端联调**。
+- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
+
+### Smoke 插件导入文件
+
+- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
+
+### 当前插件名
+
+- 正式插件：`AutoDesign`
+- smoke 插件：`AutoDesign Smoke`
+
+### 本地 bridge 地址
+
+- `http://localhost:3001`
+
+### 环境变量
+
+- `AUTODESIGN_API_URL`
+- 代码内保留旧环境变量兼容处理，但文档与新配置统一使用 `AUTODESIGN_API_URL`
+
+## 当前已支持的核心功能
+
+### 设计执行
+
+- 选区读取
+- 选区图片预览导出
+- fill / stroke / radius / opacity
+- paint style 创建或更新
+- color variable 创建或更新
+- variable binding
+
+### 设计到实现
+
+- design source 管理
+- screen / component mapping
+- review queue
+- Runtime Context Pack
+- 本地 Runtime action 测试
+
+## FAQ
+
+### 这是 MCP 吗？
+
+不是。当前仓库真正写 Figma 的主链路是 **Figma Plugin API + 本地 bridge**。
+
+### Claude 能不能用？
+
+可以。仓库的意思是兼容 **Codex / Claude** 作为 AI 操作入口，但当前代码里并没有内置 Claude SDK。你可以把它理解成：仓库提供本地执行链，AI 侧可以是 Codex，也可以是 Claude。
+
+### 为什么需要本地 bridge？
+
+因为插件运行在 Figma 里，工作台和 AI 运行在本地开发环境里。bridge 负责：
+
+- 注册插件会话
+- 传递结构化命令
+- 回传结果
+- 提供最基本的可审计性
+
+### 为什么不直接全走 MCP？
+
+因为当前仓库已经有私有开发插件执行链，而且它更适合：
+
+- 直接操作当前文件
+- 做私有本地调试
+- 精细控制插件会话和命令结果
+
+MCP 可以是未来补充，不是当前主执行面。
+
+## 仓库地图
+
+- [AGENT.md](/Users/hirohi/AutoDesign/AGENT.md)
+- [docs/architecture.md](/Users/hirohi/AutoDesign/docs/architecture.md)
+- [docs/AutoDesign_Project_Map.md](/Users/hirohi/AutoDesign/docs/AutoDesign_Project_Map.md)
+- [plugins/autodesign/README.md](/Users/hirohi/AutoDesign/plugins/autodesign/README.md)

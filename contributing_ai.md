@@ -1,6 +1,6 @@
 # contributing_ai.md
 
-> 本文件约束 Dev AI 如何在 `Figmatest` 仓库中协作。  
+> 本文件约束 Dev AI 如何在 `AutoDesign` 仓库中协作。  
 > 若与 `AGENT.md` 冲突，以 `AGENT.md` 为准。
 
 ## 0. 适用范围
@@ -61,8 +61,7 @@
 推荐命令：
 
 ```bash
-rg -n "Celest|Figmatest Command Bridge Dist v1|Command Bridge" -g '*.md'
-rg -n "AGENT\\.md|Figmatest_Project_Map\\.md" -g '*.md'
+rg -n "AutoDesign|autodesign|AutoDesign_Project_Map" -g '*.md'
 find . -type f -name '*.md' | sort
 ```
 

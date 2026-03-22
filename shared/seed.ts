@@ -2,8 +2,8 @@ import type { ProjectData } from "./types.js";
 
 export const seededProject: ProjectData = {
   meta: {
-    id: "figmatest-main",
-    name: "Figmatest Workspace",
+    id: "autodesign-main",
+    name: "AutoDesign Workspace",
     description:
       "用于验证 Figma 设计信息、React 原型映射和 Runtime AI 上下文是否能对齐的本地工作台。",
     updatedAt: "2026-03-22T00:00:00.000Z",

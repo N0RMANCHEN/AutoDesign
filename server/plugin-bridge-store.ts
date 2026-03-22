@@ -12,7 +12,8 @@ import type {
 import { nowIso } from "../shared/utils.js";
 
 const dataDirectory = path.join(process.cwd(), "data");
-const bridgeFile = path.join(dataDirectory, "figmatest-plugin-bridge.json");
+const bridgeFile = path.join(dataDirectory, "autodesign-plugin-bridge.json");
+const legacyBridgeFile = path.join(dataDirectory, "figmatest-plugin-bridge.json");
 const sessionFreshnessMs = 45_000;
 
 const emptySnapshot: PluginBridgeSnapshot = {
@@ -26,7 +27,12 @@ async function ensureBridgeFile() {
   try {
     await readFile(bridgeFile, "utf8");
   } catch {
-    await writeFile(bridgeFile, JSON.stringify(emptySnapshot, null, 2), "utf8");
+    try {
+      const legacy = await readFile(legacyBridgeFile, "utf8");
+      await writeFile(bridgeFile, legacy, "utf8");
+    } catch {
+      await writeFile(bridgeFile, JSON.stringify(emptySnapshot, null, 2), "utf8");
+    }
   }
 }
 

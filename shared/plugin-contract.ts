@@ -46,6 +46,8 @@ export type FigmaCapabilityCommand<
   payload: PluginCapabilityPayloadMap[TCapabilityId];
   executionMode?: PluginExecutionMode;
   dryRun?: boolean;
+  /** When set, only operate on nodes whose IDs are in this list instead of the entire selection. */
+  nodeIds?: string[];
 };
 
 export type FigmaPluginCommand = LegacyFigmaPluginCommand | FigmaCapabilityCommand;

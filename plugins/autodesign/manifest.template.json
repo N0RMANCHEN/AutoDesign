@@ -1,5 +1,5 @@
 {
-  "name": "Codex to Figma",
+  "name": "AutoDesign",
   "api": "1.0.0",
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",

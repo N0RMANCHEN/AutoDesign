@@ -10,11 +10,11 @@ const rootDirectory = path.resolve(__dirname, "..");
 
 const pluginPackages = [
   {
-    directory: "plugins/codex-to-figma-smoke",
+    directory: "plugins/autodesign-smoke",
     entryFile: "src/main.ts",
   },
   {
-    directory: "plugins/codex-to-figma",
+    directory: "plugins/autodesign",
     entryFile: "src/main.ts",
     uiFile: "src/ui.html",
   },

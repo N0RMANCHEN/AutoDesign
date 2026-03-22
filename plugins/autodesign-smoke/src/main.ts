@@ -1,4 +1,4 @@
-const PLUGIN_LABEL = "Figmatest Smoke Dist v1";
+const PLUGIN_LABEL = "AutoDesign Smoke";
 
 function buildMessage() {
   const pageName = figma.currentPage && figma.currentPage.name ? figma.currentPage.name : "Unknown Page";

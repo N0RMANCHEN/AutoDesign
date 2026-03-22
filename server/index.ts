@@ -312,7 +312,7 @@ async function routeRequest(
   if (context.pathname === "/api/health" && context.method === "GET") {
     sendJson(response, 200, {
       ok: true,
-      service: "figmatest-api",
+      service: "autodesign-api",
       timestamp: new Date().toISOString(),
     });
     return;
@@ -426,5 +426,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  console.log(`Figmatest API listening on http://localhost:${port}`);
+  console.log(`AutoDesign API listening on http://localhost:${port}`);
 });

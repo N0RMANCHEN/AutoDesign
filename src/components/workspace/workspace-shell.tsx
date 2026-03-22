@@ -380,7 +380,7 @@ export function WorkspaceShell() {
             </article>
             <article className="data-card">
               <span className="card-kicker">figma-plugin</span>
-              <h3>Codex to Figma</h3>
+              <h3>AutoDesign</h3>
               <p>读取当前 selection，执行 fill、paint style、color variable 和 variable binding。</p>
             </article>
           </div>
@@ -611,7 +611,7 @@ export function WorkspaceShell() {
                 </article>
               ) : (
                 <article className="data-card">
-                  <p>还没有插件连接到本地桥接。先在 Figma 中运行 `Figmatest Command Bridge`。</p>
+                  <p>还没有插件连接到本地桥接。先在 Figma 中运行 `AutoDesign`。</p>
                 </article>
               )}
 

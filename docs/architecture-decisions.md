@@ -1,6 +1,6 @@
 # 架构决策记录（ADR）
 
-> 本文记录 Figmatest 的关键方向性决策。  
+> 本文记录 AutoDesign 的关键方向性决策。  
 > 当项目定位、Prompt 契约或实施路径发生明显变化时，应补充新的 ADR。
 
 ## ADR-001：仓库采用 docs-first 方式推进
@@ -110,7 +110,7 @@
 
 ### 决策内容
 
-将旧的 `Celest` 语义和文件命名统一替换为 `Figmatest`，包括入口文件和项目地图。
+将旧的项目命名统一替换为 `AutoDesign`，包括入口文件、项目地图、插件目录与用户可见品牌名。
 
 ### 决策理由
 
@@ -125,8 +125,8 @@
 
 ### 影响范围
 
-- `Agents.md` 重命名为 `AGENT.md`
-- `docs/Celest_Project_Map.md` 重命名为 `docs/Figmatest_Project_Map.md`
+- `docs/AutoDesign_Project_Map.md` 作为统一仓库地图
+- 插件目录改为 `plugins/autodesign/` 与 `plugins/autodesign-smoke/`
 - 所有 Markdown 引用都需要同步修复
 
 ## ADR-006：使用 Next.js App Router + 本地 JSON 后端落 MVP
@@ -165,7 +165,7 @@
 
 - `src/`：Vite + React 工作台
 - `server/`：独立本地 Node API
-- `plugins/codex-to-figma/`：独立 Figma 插件执行器
+- `plugins/autodesign/`：独立 Figma 插件执行器
 
 并新增 `shared/` 作为共享领域模型与命令契约层。
 

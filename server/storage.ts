@@ -6,7 +6,8 @@ import type { ProjectData } from "../shared/types.js";
 import { nowIso } from "../shared/utils.js";
 
 const dataDirectory = path.join(process.cwd(), "data");
-const projectFile = path.join(dataDirectory, "figmatest-project.json");
+const projectFile = path.join(dataDirectory, "autodesign-project.json");
+const legacyProjectFile = path.join(dataDirectory, "figmatest-project.json");
 
 async function ensureDataFile() {
   await mkdir(dataDirectory, { recursive: true });
@@ -14,7 +15,12 @@ async function ensureDataFile() {
   try {
     await readFile(projectFile, "utf8");
   } catch {
-    await writeFile(projectFile, JSON.stringify(seededProject, null, 2), "utf8");
+    try {
+      const legacy = await readFile(legacyProjectFile, "utf8");
+      await writeFile(projectFile, legacy, "utf8");
+    } catch {
+      await writeFile(projectFile, JSON.stringify(seededProject, null, 2), "utf8");
+    }
   }
 }
 

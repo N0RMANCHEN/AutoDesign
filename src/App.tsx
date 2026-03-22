@@ -8,7 +8,7 @@ function capabilityCards() {
       copy: "工作台负责同步设计摘要、维护组件映射、生成 Runtime Context Pack，并为后续代码生成链路提供统一上下文。",
     },
     {
-      kicker: "Codex to Figma",
+      kicker: "AutoDesign Plugin",
       title: "用独立插件执行颜色、样式和变量操作",
       copy: "Figma 插件和工作台分离，插件只负责在 Figma 文件里读取选择并执行可审计命令，不承担 React 工作台逻辑。",
     },
@@ -24,7 +24,7 @@ export default function App() {
   return (
     <main className="landing-shell">
       <section className="landing-hero">
-        <div className="eyebrow">Figmatest / Vite + React Workspace</div>
+        <div className="eyebrow">AutoDesign / Vite + React Workspace</div>
         <h1>同一个仓库，承载两条清晰分离的链路。</h1>
         <p className="hero-copy">
           `workspace` 负责 Figma 到 React 的映射与 AI 上下文，`figma-plugin`

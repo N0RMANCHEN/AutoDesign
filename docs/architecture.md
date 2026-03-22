@@ -1,4 +1,4 @@
-# Codex to Figma 架构总览
+# AutoDesign 架构总览
 
 ## 1. 项目定位
 
@@ -13,7 +13,7 @@
   - 职责：承载 Figma-to-React 上下文整理、组件映射、Runtime Context Pack 与本地 action 测试
 - **Plugin System**
   - 技术形态：独立 Figma Plugin
-  - 职责：承载 Codex-to-Figma 的执行操作，例如 selection、preview、fill、style、variable 与 binding
+  - 职责：承载 AI-to-Figma 的执行操作，例如 selection、preview、fill、style、variable 与 binding
 - **Bridge Runtime**
   - 技术形态：本地 HTTP API + JSON 队列
   - 职责：维护插件会话、命令队列、结果回传与能力声明
@@ -86,7 +86,7 @@
 
 - `src/` 中的 Vite + React 前端
 - `server/` 中的本地 Node API
-- `data/figmatest-project.json` 作为持久化层
+- `data/autodesign-project.json` 作为持久化层
 
 ### 4.4 Plugin Runtime
 
@@ -99,10 +99,10 @@
 
 当前实现形态：
 
-- `plugins/codex-to-figma/src/main.ts`
-- `plugins/codex-to-figma/src/runtime/`
-- `plugins/codex-to-figma/src/ui.html`
-- `plugins/codex-to-figma/dist/manifest.json`
+- `plugins/autodesign/src/main.ts`
+- `plugins/autodesign/src/runtime/`
+- `plugins/autodesign/src/ui.html`
+- `plugins/autodesign/dist/manifest.json`
 
 ### 4.5 AI Runtime Contracts
 
@@ -124,7 +124,7 @@ AI 契约层定义：
 - 命令 envelope 如何批量执行
 - 结果如何结构化回传与审阅
 
-它回答“Codex 产出的命令如何安全、可审计地进入 Figma”。
+它回答“Codex / Claude 产出的命令如何安全、可审计地进入 Figma”。
 
 ### 4.7 Local Bridge Runtime
 
@@ -187,3 +187,4 @@ AI 契约层定义：
 - 本地 JSON 持久化适合 MVP，但未来切数据库时需要额外抽象
 - 插件当前覆盖的是颜色相关写操作，尚未覆盖更复杂的组件属性或文本样式
 - Figma-to-React 目前仍以上下文整理和映射验证为主，不等于完整代码生成系统
+

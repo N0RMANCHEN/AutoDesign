@@ -275,6 +275,21 @@ async function upsertColorVariable(
   };
 }
 
+function getTargetNodes(command: FigmaCapabilityCommand): ReturnType<typeof getSelection> {
+  const selection = getSelection();
+  if (!command.nodeIds || command.nodeIds.length === 0) {
+    return selection;
+  }
+  const idSet = new Set(command.nodeIds);
+  const filtered = selection.filter((node: (typeof selection)[number]) => idSet.has(node.id));
+  if (!filtered.length) {
+    throw new Error(
+      `指定的 nodeIds 在当前 selection 中未找到匹配节点。nodeIds: ${command.nodeIds.join(", ")}`,
+    );
+  }
+  return filtered;
+}
+
 async function runCapabilityCommand(
   command: FigmaCapabilityCommand,
 ): Promise<PluginCommandExecutionResult> {
@@ -300,7 +315,7 @@ async function runCapabilityCommand(
       const paint = createSolidPaint(payload.hex);
       const changedNodeIds: string[] = [];
 
-      for (const node of getSelection()) {
+      for (const node of getTargetNodes(command)) {
         try {
           if (applyFillToNode(node, paint)) {
             changedNodeIds.push(node.id);
@@ -328,7 +343,7 @@ async function runCapabilityCommand(
       const paint = createSolidPaint(payload.hex);
       const changedNodeIds: string[] = [];
 
-      for (const node of getSelection()) {
+      for (const node of getTargetNodes(command)) {
         try {
           if (applyStrokeToNode(node, paint)) {
             changedNodeIds.push(node.id);
@@ -354,7 +369,7 @@ async function runCapabilityCommand(
     case "geometry.set-radius": {
       const payload = command.payload as { value: number };
       const changedNodeIds: string[] = [];
-      for (const node of getSelection()) {
+      for (const node of getTargetNodes(command)) {
         try {
           if (applyRadiusToNode(node, payload.value)) {
             changedNodeIds.push(node.id);
@@ -380,7 +395,7 @@ async function runCapabilityCommand(
     case "nodes.set-opacity": {
       const payload = command.payload as { value: number };
       const changedNodeIds: string[] = [];
-      for (const node of getSelection()) {
+      for (const node of getTargetNodes(command)) {
         try {
           if (applyOpacityToNode(node, payload.value)) {
             changedNodeIds.push(node.id);

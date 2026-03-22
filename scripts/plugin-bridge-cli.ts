@@ -13,7 +13,10 @@ import type {
 } from "../shared/plugin-bridge.js";
 import type { FigmaPluginCommandBatch } from "../shared/plugin-contract.js";
 
-const BASE_URL = process.env.FIGMATEST_API_URL ?? "http://localhost:3001";
+const BASE_URL =
+  process.env.AUTODESIGN_API_URL ??
+  process.env.FIGMATEST_API_URL ??
+  "http://localhost:3001";
 
 type Mode = "status" | "send" | "preview";
 type PreviewTarget = {
@@ -70,7 +73,7 @@ function pickSession(
   explicitSessionId: string | null,
 ) {
   if (!sessions.length) {
-    fail("当前没有在线插件会话。请先在 Figma 里打开 Codex to Figma。");
+    fail("当前没有在线插件会话。请先在 Figma 里打开 AutoDesign。");
   }
 
   if (explicitSessionId) {
@@ -134,7 +137,7 @@ function printSelection(session: PluginBridgeSession) {
 
   for (const node of session.selection) {
     console.log(
-      `- ${node.name} [${node.type}] fills=${node.fills.join(", ") || "none"} fillStyleId=${node.fillStyleId || "none"}`,
+      `- ${node.name} [${node.type}] id=${node.id} fills=${node.fills.join(", ") || "none"} fillStyleId=${node.fillStyleId || "none"}`,
     );
   }
 }
@@ -282,6 +285,15 @@ async function runSend(argv: string[]) {
   const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
   const session = pickSession(snapshot.sessions, readFlag(argv, "--session"));
   const { batch, composition } = parseBatchFromArgs(argv);
+  const nodeIdsRaw = readFlag(argv, "--node-ids");
+  if (nodeIdsRaw) {
+    const nodeIds = nodeIdsRaw.split(",").map((id) => id.trim()).filter(Boolean);
+    for (const command of batch.commands) {
+      if (command.type === "capability") {
+        command.nodeIds = nodeIds;
+      }
+    }
+  }
   const payload: QueuePluginCommandPayload = {
     targetSessionId: session.id,
     source: "codex",
