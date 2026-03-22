@@ -11,10 +11,10 @@
 
 入口如下：
 
-- `docs/ai/runtime/README.md`
-- `docs/ai/runtime/SYSTEM_PROMPT.md`
-- `docs/ai/runtime/actions/**`
-- `docs/ai/runtime/contracts/**`
+- `doc/ai/runtime/README.md`
+- `doc/ai/runtime/SYSTEM_PROMPT.md`
+- `doc/ai/runtime/actions/**`
+- `doc/ai/runtime/contracts/**`
 
 这套文档主要服务于两类场景：
 

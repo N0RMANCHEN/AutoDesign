@@ -6,7 +6,7 @@
 ## 0. 适用范围
 
 - **Dev AI**：Codex、Claude、Cursor、Copilot 类开发协作 AI
-- **Runtime AI**：未来产品内用于设计摘要、联调辅助的运行时 AI，相关规范见 `docs/ai/runtime/`
+- **Runtime AI**：未来产品内用于设计摘要、联调辅助的运行时 AI，相关规范见 `doc/ai/runtime/`
 
 本文件只约束前者。
 
@@ -28,7 +28,7 @@
 3. `README.md`
 4. 本次任务直接相关的文档
 
-如果任务涉及 AI Prompt，额外阅读 `docs/ai/runtime/README.md` 与对应 action 文档。
+如果任务涉及 AI Prompt，额外阅读 `doc/ai/runtime/README.md` 与对应 action 文档。
 
 ## 3. 非协商规则
 
@@ -48,6 +48,20 @@
 
 示例、错误信息、诊断说明中不要加入绝对路径、私密 token、无关业务数据。
 
+### 3.5 正式插件 UI 没有显式授权不得改
+
+- `plugins/autodesign/src/ui.html` 属于冻结面
+- 用户没有明确提出“修改插件 UI”时，不能改它的布局、尺寸、样式、文案或可见交互
+- 如果用户明确要求改 UI，必须同步更新 `plugins/autodesign/ui.lock.json`
+
+### 3.6 本地 bridge 默认不再重复询问
+
+- 对本项目中的 Dev AI，用户已明确授权默认访问 `http://localhost:3001/api/*`
+- 该授权适用于当前仓库里的 Figma bridge 读取与写回链路
+- 只要仍是当前项目、当前本地 bridge、当前 Figma 会话范围，就不要再为 localhost bridge 访问重复询问
+- 如果宿主工具仍然弹审批，属于工具运行时限制，不要误写成“用户未授权”
+- 如果访问目标超出 `localhost:3001/api/*` 或超出当前项目范围，再单独确认
+
 ## 4. 文档任务的最低验证
 
 文档修改至少完成以下检查：
@@ -61,7 +75,7 @@
 推荐命令：
 
 ```bash
-rg -n "AutoDesign|autodesign|AutoDesign_Project_Map" -g '*.md'
+rg -n "AutoDesign|autodesign|Project-Map|Capability-Catalog" -g '*.md'
 find . -type f -name '*.md' | sort
 ```
 
@@ -73,6 +87,7 @@ find . -type f -name '*.md' | sort
 - Prompt / JSON 契约：格式检查 + 关联文档抽查
 - React 原型 / API：至少 `npm run build` 或最小 smoke test
 - 联调脚本 / 插件 bridge：至少执行一次示例输入验证
+- 正式插件 UI：至少 `npm run verify:plugin-ui-lock`
 
 如果做不到，必须明确写 `NOT VERIFIED` 并说明原因。
 
@@ -82,9 +97,9 @@ find . -type f -name '*.md' | sort
 
 - `README.md`：项目定位、入口导航是否变化
 - `AGENT.md`：是否影响总原则
-- `docs/architecture*.md`：方案边界与实施路径是否变化
-- `docs/ai/runtime/*`：输入输出契约是否仍自洽
-- `docs/code-quality-standards.md`：质量门槛是否需要同步
+- `doc/Architecture.md`：方案边界与实施路径是否变化
+- `doc/Architecture-Folder-Governance.md`：目录职责与文档治理是否变化
+- `doc/ai/runtime/*`：输入输出契约是否仍自洽
 
 ## 7. 输出要求
 

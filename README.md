@@ -22,11 +22,16 @@
 
 - 读取当前 selection
 - 导出选中节点预览，供 AI 看图片内容
-- 改 fill / stroke / radius / opacity
+- 改 fill / stroke / radius / opacity / size / position / effects
+- 创建与删除基础节点：frame / text / delete / undo
+- 创建基础矢量节点：rectangle / ellipse / line / svg
+- 改文本内容、字体、字号、字重、文字颜色
 - 创建或更新本地 paint style
+- 创建或更新本地 text style
 - 创建或更新颜色变量
 - 把颜色变量绑定到节点 fill
 - 通过结构化 capability 命令执行批量操作
+- 创建 reconstruction job，为“目标 Frame + 参考图”自动还原工作流提供底座
 
 ### B. Figma -> Codex / Claude -> React
 
@@ -140,6 +145,84 @@ npm run plugin:send -- --prompt "把当前选中对象改成粉色"
 npm run plugin:preview
 ```
 
+- 为“目标 Frame + 参考图”创建 reconstruction job
+
+```bash
+npm run plugin:reconstruct
+```
+
+说明：
+
+- 现在默认优先创建 `vector-reconstruction` job，目标是“固定 target frame、去透视、纯可编辑矢量重建”
+- 创建后推荐主链是 `--analyze -> --context-pack -> --submit-analysis -> --apply -> --render -> --measure`
+
+- 对已有 job 运行 preview-only 参考图分析
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --analyze
+```
+
+说明：
+
+- `vector-reconstruction` job 的 `--analyze` 只会导出并锁定参考图高分辨率资源，等待后续提交正视正交的矢量 analysis
+- `raster-exact` job 只保留为调试/对照链路，不再是默认主链
+- `structural-preview` job 的 `--analyze` 仍然只跑本地 heuristic fallback，用来兜底，不再是高保真主链
+- 结构化高保真主链仍然是 `Codex-assisted`
+
+- 导出 Codex-assisted context pack，并把参考图/目标图预览落盘到本地
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --context-pack
+```
+
+- 将 Codex 输出的结构化 analysis 提交回 job
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --submit-analysis --analysis-file <path/to/analysis.json>
+```
+
+- 查看可审阅的 preview-plan，并检查 OCR / review flags / 字体候选
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --preview-plan
+```
+
+- 确认某个文本区域的字体选择
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --review-font --text-candidate <textCandidateId> --font "SF Pro Display"
+```
+
+- 显式批准当前 preview-plan，之后才允许 apply
+
+说明：
+
+- `vector-reconstruction` / `structural-preview` 只有在 `approvalState=pending-review` 时才需要 `--approve-plan`
+- `vector-reconstruction` apply 会保持 target frame 尺寸固定，只写入可编辑 vector/text 节点
+- `raster-exact` 仍会直接贴图并调整尺寸，但仅作为调试路径保留
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --approve-plan
+```
+
+- 把 reconstruction 结果写入目标 Frame
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --apply
+```
+
+- 清理当前 job 创建的结果节点
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --clear
+```
+
+- 对结构化 job 运行有界自动 refine loop，直到命中停止条件
+
+```bash
+npm run plugin:reconstruct -- --job <jobId> --loop
+```
+
 ### 工作流 2：从 Figma 选中内容出发改 React
 
 1. 在 Figma 里确认当前设计选中或设计上下文
@@ -160,13 +243,22 @@ npm run plugin:preview
 - 插件 selection 读取与预览导出
 - capability registry
 - 结构化命令 envelope
-- fill / stroke / radius / opacity
-- paint style / color variable / variable binding
+- fill / stroke / radius / opacity / size / position / effects
+- text、style、variable 基础能力
+  - 含字号、字体、字重、文字颜色、行高、字距、对齐
+- frame / text 创建、delete、undo
+- reconstruction job 创建、preview-only 分析、skeleton apply / clear、render / measure / refine / loop
+- reconstruction job 创建、vector analysis 提交、固定 frame 矢量 apply / clear、render / measure
+- reconstruction job `context-pack -> Codex -> submit-analysis -> preview-plan -> approve -> apply` 主链
+- reconstruction job OCR block / review flag / approval state 基础层
 - 工作台与插件的本地桥接
 
 ### 已有架构底座，但未完成扩展
 
-- 文本能力
+- 参考图解析
+- 字体匹配精度与真实 OCR
+- 有界的像素 diff 自动修正写回
+- 图片补全 / outpainting
 - auto layout / geometry 更多控制
 - 组件属性与实例 override
 - library / publish / sync 类能力
@@ -308,6 +400,11 @@ MCP 可以是未来补充，不是当前主执行面。
 ## 仓库地图
 
 - [AGENT.md](/Users/hirohi/AutoDesign/AGENT.md)
-- [docs/architecture.md](/Users/hirohi/AutoDesign/docs/architecture.md)
-- [docs/AutoDesign_Project_Map.md](/Users/hirohi/AutoDesign/docs/AutoDesign_Project_Map.md)
+- [doc/Roadmap.md](/Users/hirohi/AutoDesign/doc/Roadmap.md)
+- [doc/Architecture-Folder-Governance.md](/Users/hirohi/AutoDesign/doc/Architecture-Folder-Governance.md)
+- [doc/Architecture.md](/Users/hirohi/AutoDesign/doc/Architecture.md)
+- [doc/Capability-Catalog.md](/Users/hirohi/AutoDesign/doc/Capability-Catalog.md)
+- [doc/Project-Map.md](/Users/hirohi/AutoDesign/doc/Project-Map.md)
+- [doc/ai/README.md](/Users/hirohi/AutoDesign/doc/ai/README.md)
+- [doc/plans/README.md](/Users/hirohi/AutoDesign/doc/plans/README.md)
 - [plugins/autodesign/README.md](/Users/hirohi/AutoDesign/plugins/autodesign/README.md)

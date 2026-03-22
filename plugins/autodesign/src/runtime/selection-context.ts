@@ -1,4 +1,4 @@
-import type { PluginNodeSummary } from "../../../../shared/plugin-bridge.js";
+import type { PluginImageArtifact, PluginNodeSummary } from "../../../../shared/plugin-bridge.js";
 
 const FILL_CAPABLE_TYPES = new Set([
   "BOOLEAN_OPERATION",
@@ -150,6 +150,9 @@ export function nodeSummary(node: any): PluginNodeSummary {
     fillable: supportsFills(node),
     fills: nodeFillSummary(node),
     fillStyleId: supportsFills(node) ? node.fillStyleId || null : null,
+    width: typeof node.width === "number" ? node.width : null,
+    height: typeof node.height === "number" ? node.height : null,
+    hasImageFill: Boolean(findImagePaint(node)),
   };
 }
 
@@ -171,6 +174,68 @@ function bytesToBase64(bytes: Uint8Array) {
   }
 
   return output;
+}
+
+function parsePngDimensions(bytes: Uint8Array) {
+  if (bytes.length < 24) {
+    return null;
+  }
+  return {
+    width:
+      ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0,
+    height:
+      ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0,
+  };
+}
+
+function parseGifDimensions(bytes: Uint8Array) {
+  if (bytes.length < 10) {
+    return null;
+  }
+  return {
+    width: bytes[6] | (bytes[7] << 8),
+    height: bytes[8] | (bytes[9] << 8),
+  };
+}
+
+function parseJpegDimensions(bytes: Uint8Array) {
+  let index = 2;
+  while (index + 8 < bytes.length) {
+    if (bytes[index] !== 0xff) {
+      index += 1;
+      continue;
+    }
+
+    const marker = bytes[index + 1];
+    index += 2;
+    if (marker === 0xd8 || marker === 0xd9) {
+      continue;
+    }
+    if (index + 1 >= bytes.length) {
+      break;
+    }
+
+    const segmentLength = (bytes[index] << 8) | bytes[index + 1];
+    if (segmentLength < 2 || index + segmentLength > bytes.length) {
+      break;
+    }
+
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+    if (isStartOfFrame && segmentLength >= 7) {
+      return {
+        height: (bytes[index + 3] << 8) | bytes[index + 4],
+        width: (bytes[index + 5] << 8) | bytes[index + 6],
+      };
+    }
+
+    index += segmentLength;
+  }
+
+  return null;
 }
 
 function detectImageMime(bytes: Uint8Array) {
@@ -195,14 +260,31 @@ function detectImageMime(bytes: Uint8Array) {
   return "application/octet-stream";
 }
 
-async function exportImageFillPreviewDataUrl(node: any) {
+function detectImageDimensions(bytes: Uint8Array, mimeType: string) {
+  if (mimeType === "image/png") {
+    return parsePngDimensions(bytes);
+  }
+  if (mimeType === "image/gif") {
+    return parseGifDimensions(bytes);
+  }
+  if (mimeType === "image/jpeg") {
+    return parseJpegDimensions(bytes);
+  }
+  return null;
+}
+
+function findImagePaint(node: any) {
   if (!supportsFills(node) || node.fills === figma.mixed) {
     return null;
   }
 
-  const imagePaint = node.fills.find(
+  return node.fills.find(
     (paint: any) => paint && paint.type === "IMAGE" && typeof paint.imageHash === "string",
-  );
+  ) || null;
+}
+
+async function exportImageFillPreviewDataUrl(node: any) {
+  const imagePaint = findImagePaint(node);
   if (!imagePaint) {
     return null;
   }
@@ -216,6 +298,78 @@ async function exportImageFillPreviewDataUrl(node: any) {
     const bytes = await image.getBytesAsync();
     const mimeType = detectImageMime(bytes);
     return `data:${mimeType};base64,${bytesToBase64(bytes)}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function exportNodeImageArtifact(
+  node: any,
+  options?: {
+    preferOriginalBytes?: boolean;
+    constraint?: { type: "WIDTH" | "HEIGHT" | "SCALE"; value: number };
+  },
+): Promise<PluginImageArtifact | null> {
+  const imagePaint = options?.preferOriginalBytes ? findImagePaint(node) : null;
+  if (imagePaint) {
+    const image = figma.getImageByHash(imagePaint.imageHash);
+    if (image) {
+      try {
+        const bytes = await image.getBytesAsync();
+        const mimeType = detectImageMime(bytes);
+        const dimensions =
+          detectImageDimensions(bytes, mimeType) || {
+            width: typeof node.width === "number" ? Math.round(node.width) : 0,
+            height: typeof node.height === "number" ? Math.round(node.height) : 0,
+          };
+        return {
+          kind: "node-image",
+          nodeId: node.id,
+          mimeType,
+          width: dimensions.width,
+          height: dimensions.height,
+          dataUrl: `data:${mimeType};base64,${bytesToBase64(bytes)}`,
+          source: "image-fill-original",
+        };
+      } catch {
+        // Fall back to node export below.
+      }
+    }
+  }
+
+  if (!("exportAsync" in node) || typeof node.exportAsync !== "function") {
+    return null;
+  }
+
+  try {
+    const exportConstraint =
+      options?.constraint &&
+      Number.isFinite(options.constraint.value) &&
+      options.constraint.value > 0
+        ? {
+            type: options.constraint.type,
+            value: options.constraint.value,
+          }
+        : undefined;
+    const bytes = await node.exportAsync({
+      format: "PNG",
+      ...(exportConstraint ? { constraint: exportConstraint } : {}),
+    });
+    const mimeType = "image/png";
+    const dimensions =
+      detectImageDimensions(bytes, mimeType) || {
+        width: typeof node.width === "number" ? Math.round(node.width) : 0,
+        height: typeof node.height === "number" ? Math.round(node.height) : 0,
+      };
+    return {
+      kind: "node-image",
+      nodeId: node.id,
+      mimeType,
+      width: dimensions.width,
+      height: dimensions.height,
+      dataUrl: `data:${mimeType};base64,${bytesToBase64(bytes)}`,
+      source: "node-export",
+    };
   } catch {
     return null;
   }

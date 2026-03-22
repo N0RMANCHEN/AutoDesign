@@ -6,6 +6,7 @@ import {
 } from "../../../../shared/plugin-capabilities.js";
 import type {
   PluginCommandExecutionResult,
+  PluginRuntimeFeatures,
 } from "../../../../shared/plugin-bridge.js";
 import type {
   FigmaCapabilityCommand,
@@ -15,6 +16,7 @@ import type {
 import {
   clonePaints,
   createSolidPaint,
+  exportNodeImageArtifact,
   getBoundFillVariableIds,
   getSelection,
   normalizeHex,
@@ -22,6 +24,119 @@ import {
   supportsFills,
   supportsStrokes,
 } from "./selection-context.js";
+
+// ── Undo stack ──────────────────────────────────────────────────────────
+
+type PropertySnapshot = { nodeId: string; properties: Record<string, any> };
+type UndoEntry = {
+  capabilityId: PluginCapabilityId;
+  snapshots: PropertySnapshot[];
+  createdNodeIds: string[];
+};
+
+const UNDO_STACK_MAX = 20;
+const undoStack: UndoEntry[] = [];
+
+const NON_UNDOABLE_CAPABILITIES = new Set<string>([
+  "selection.refresh",
+  "undo.undo-last",
+  "nodes.delete",
+  "assets.export-node-image",
+  "reconstruction.apply-raster-reference",
+  "styles.upsert-paint-style",
+  "styles.upsert-text-style",
+  "variables.upsert-color-variable",
+]);
+
+const CREATION_CAPABILITIES = new Set<string>([
+  "nodes.create-frame",
+  "nodes.create-text",
+  "nodes.create-rectangle",
+  "nodes.create-ellipse",
+  "nodes.create-line",
+  "nodes.create-svg",
+  "nodes.duplicate",
+  "nodes.group",
+  "nodes.frame-selection",
+]);
+
+function snapshotNodeProperties(
+  node: any,
+  capabilityId: PluginCapabilityId,
+): Record<string, any> | null {
+  const props: Record<string, any> = {};
+
+  switch (capabilityId) {
+    case "fills.set-fill":
+    case "fills.clear-fill":
+    case "text.set-text-color":
+      if ("fills" in node) props.fills = clonePaints(node.fills === figma.mixed ? [] : node.fills);
+      if ("fillStyleId" in node) props.fillStyleId = node.fillStyleId;
+      break;
+    case "strokes.set-stroke":
+    case "strokes.clear-stroke":
+      if ("strokes" in node) props.strokes = clonePaints(node.strokes === figma.mixed ? [] : node.strokes);
+      if ("strokeStyleId" in node) props.strokeStyleId = node.strokeStyleId;
+      break;
+    case "strokes.set-weight":
+      if ("strokeWeight" in node) props.strokeWeight = node.strokeWeight;
+      break;
+    case "effects.set-shadow":
+    case "effects.set-layer-blur":
+    case "effects.clear-effects":
+      if ("effects" in node) props.effects = node.effects.map((e: any) => ({ ...e }));
+      break;
+    case "geometry.set-radius":
+      if ("cornerRadius" in node) props.cornerRadius = node.cornerRadius;
+      break;
+    case "geometry.set-size":
+      if ("width" in node) { props.width = node.width; props.height = node.height; }
+      break;
+    case "geometry.set-position":
+      if ("x" in node) { props.x = node.x; props.y = node.y; }
+      break;
+    case "nodes.set-opacity":
+      if ("opacity" in node) props.opacity = node.opacity;
+      break;
+    case "nodes.rename":
+      if ("name" in node) props.name = node.name;
+      break;
+    case "text.set-content":
+      if ("characters" in node) props.characters = node.characters;
+      break;
+    case "text.set-font-size":
+      if ("fontSize" in node) props.fontSize = node.fontSize;
+      break;
+    case "text.set-font-family":
+    case "text.set-font-weight":
+      if ("fontName" in node) props.fontName = node.fontName !== figma.mixed ? { ...node.fontName } : null;
+      break;
+    case "text.set-line-height":
+      if ("lineHeight" in node) props.lineHeight = node.lineHeight;
+      break;
+    case "text.set-letter-spacing":
+      if ("letterSpacing" in node) props.letterSpacing = node.letterSpacing;
+      break;
+    case "text.set-alignment":
+      if ("textAlignHorizontal" in node) props.textAlignHorizontal = node.textAlignHorizontal;
+      break;
+    case "styles.apply-style":
+      if ("fillStyleId" in node) props.fillStyleId = node.fillStyleId;
+      if ("textStyleId" in node) props.textStyleId = node.textStyleId;
+      break;
+    case "styles.detach-style":
+      if ("fillStyleId" in node) props.fillStyleId = node.fillStyleId;
+      if ("strokeStyleId" in node) props.strokeStyleId = node.strokeStyleId;
+      if ("textStyleId" in node) props.textStyleId = node.textStyleId;
+      break;
+    default:
+      return null;
+  }
+
+  return Object.keys(props).length > 0 ? props : null;
+}
+
+// ── End undo helpers ────────────────────────────────────────────────────
 
 type BatchRunResult = {
   ok: boolean;
@@ -40,6 +155,7 @@ function successResult(
     changedNodeIds: [],
     createdStyleIds: [],
     createdVariableIds: [],
+    exportedImages: [],
     warnings: [],
     errorCode: null,
     message,
@@ -58,10 +174,44 @@ function failureResult(
     changedNodeIds: [],
     createdStyleIds: [],
     createdVariableIds: [],
+    exportedImages: [],
     warnings: [],
     errorCode: "capability_failed",
     message,
     ...(details || {}),
+  };
+}
+
+function decodeDataUrl(dataUrl: string) {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) {
+    throw new Error("图片 dataUrl 格式无效。");
+  }
+
+  const base64 = match[2];
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const normalized = base64.replace(/=+$/, "");
+  const output: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+
+  for (const char of normalized) {
+    const value = alphabet.indexOf(char);
+    if (value < 0) {
+      continue;
+    }
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push((buffer >> bits) & 255);
+    }
+  }
+
+  const bytes = new Uint8Array(output);
+  return {
+    mimeType: match[1],
+    bytes,
   };
 }
 
@@ -133,7 +283,17 @@ function applyFillToNode(node: any, paint: any) {
   }
 
   node.fills = [paint];
-  node.fillStyleId = "";
+  try { node.fillStyleId = ""; } catch { /* no style binding to clear */ }
+  return true;
+}
+
+function clearFillOnNode(node: any) {
+  if (!supportsFills(node)) {
+    return false;
+  }
+
+  node.fills = [];
+  try { node.fillStyleId = ""; } catch { /* no style binding to clear */ }
   return true;
 }
 
@@ -143,10 +303,535 @@ function applyStrokeToNode(node: any, paint: any) {
   }
 
   node.strokes = [paint];
-  node.strokeStyleId = "";
+  try { node.strokeStyleId = ""; } catch { /* no style binding to clear */ }
   if (!node.strokeWeight || node.strokeWeight <= 0) {
     node.strokeWeight = 1;
   }
+  return true;
+}
+
+function clearStrokeOnNode(node: any) {
+  if (!supportsStrokes(node)) {
+    return false;
+  }
+
+  node.strokes = [];
+  try { node.strokeStyleId = ""; } catch { /* no style binding to clear */ }
+  return true;
+}
+
+function applyStrokeWeightToNode(node: any, value: number) {
+  if (!supportsStrokes(node)) {
+    return {
+      changed: false,
+      warning: null,
+    };
+  }
+
+  if (node.strokes !== figma.mixed && Array.isArray(node.strokes) && node.strokes.length === 0) {
+    return {
+      changed: false,
+      warning: `${node.name || node.id} 当前没有 stroke，已跳过描边粗细修改。`,
+    };
+  }
+
+  node.strokeWeight = value;
+  return {
+    changed: true,
+    warning: null,
+  };
+}
+
+function supportsEffects(node: any) {
+  return "effects" in node;
+}
+
+function supportsResize(node: any) {
+  return "resize" in node && typeof node.resize === "function";
+}
+
+function supportsPosition(node: any) {
+  return "x" in node && "y" in node;
+}
+
+function createShadowEffect(payload: {
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  spread?: number;
+  colorHex?: string;
+  opacity?: number;
+}) {
+  const basePaint = createSolidPaint(payload.colorHex || "#000000");
+  return {
+    type: "DROP_SHADOW",
+    color: {
+      ...basePaint.color,
+      a: Math.max(0, Math.min(1, (payload.opacity ?? 20) / 100)),
+    },
+    offset: {
+      x: payload.offsetX,
+      y: payload.offsetY,
+    },
+    radius: payload.blur,
+    spread: payload.spread ?? 0,
+    visible: true,
+    blendMode: "NORMAL",
+  };
+}
+
+function setShadowOnNode(
+  node: any,
+  payload: {
+    offsetX: number;
+    offsetY: number;
+    blur: number;
+    spread?: number;
+    colorHex?: string;
+    opacity?: number;
+  },
+) {
+  if (!supportsEffects(node)) {
+    return false;
+  }
+
+  const currentEffects = Array.isArray(node.effects)
+    ? node.effects.map((effect: any) => Object.assign({}, effect))
+    : [];
+  const preservedEffects = currentEffects.filter((effect: any) => effect.type !== "DROP_SHADOW");
+  node.effects = [...preservedEffects, createShadowEffect(payload)];
+  return true;
+}
+
+function setLayerBlurOnNode(node: any, radius: number) {
+  if (!supportsEffects(node)) {
+    return false;
+  }
+
+  const currentEffects = Array.isArray(node.effects)
+    ? node.effects.map((effect: any) => Object.assign({}, effect))
+    : [];
+  const preservedEffects = currentEffects.filter((effect: any) => effect.type !== "LAYER_BLUR");
+  node.effects = [
+    ...preservedEffects,
+    {
+      type: "LAYER_BLUR",
+      radius,
+      visible: true,
+    },
+  ];
+  return true;
+}
+
+function clearEffectsOnNode(node: any) {
+  if (!supportsEffects(node)) {
+    return false;
+  }
+
+  node.effects = [];
+  return true;
+}
+
+function resizeNode(node: any, width: number, height: number) {
+  if (!supportsResize(node)) {
+    return false;
+  }
+
+  node.resize(width, height);
+  return true;
+}
+
+function moveNode(node: any, x: number, y: number) {
+  if (!supportsPosition(node)) {
+    return false;
+  }
+
+  node.x = x;
+  node.y = y;
+  return true;
+}
+
+function supportsNaming(node: any) {
+  return "name" in node;
+}
+
+function supportsCloning(node: any) {
+  return "clone" in node && typeof node.clone === "function";
+}
+
+function supportsChildren(node: any) {
+  return node && "children" in node && Array.isArray(node.children);
+}
+
+async function resolveParentNode(parentNodeId?: string): Promise<any> {
+  if (!parentNodeId) {
+    return figma.currentPage;
+  }
+
+  const node = await figma.getNodeByIdAsync(parentNodeId);
+  if (!node) {
+    throw new Error(`parentNodeId "${parentNodeId}" 在当前文件中未找到。`);
+  }
+
+  if (!supportsChildren(node)) {
+    throw new Error(
+      `parentNodeId "${parentNodeId}" (${node.type}) 不是容器节点，不支持子节点。`,
+    );
+  }
+
+  return node;
+}
+
+function renameNode(node: any, name: string) {
+  if (!supportsNaming(node)) {
+    return false;
+  }
+
+  node.name = name;
+  return true;
+}
+
+function duplicateNode(node: any, offsetX: number, offsetY: number) {
+  if (!supportsCloning(node)) {
+    return null;
+  }
+
+  const cloned = node.clone();
+  if (supportsPosition(node) && supportsPosition(cloned)) {
+    cloned.x = node.x + offsetX;
+    cloned.y = node.y + offsetY;
+  }
+  return cloned;
+}
+
+function applyFillStrokeOpacity(
+  node: any,
+  options: {
+    fillHex?: string;
+    strokeHex?: string;
+    strokeWeight?: number;
+    opacity?: number;
+  },
+) {
+  if (options.fillHex && "fills" in node) {
+    node.fills = [createSolidPaint(options.fillHex)];
+  } else if ("fills" in node && node.type !== "LINE") {
+    node.fills = [];
+  }
+
+  if (options.strokeHex && "strokes" in node) {
+    node.strokes = [createSolidPaint(options.strokeHex)];
+  } else if ("strokes" in node && node.type === "LINE") {
+    node.strokes = [];
+  }
+
+  if (options.strokeWeight !== undefined && "strokeWeight" in node) {
+    if (!Number.isFinite(options.strokeWeight) || Number(options.strokeWeight) < 0) {
+      throw new Error("strokeWeight 必须是大于等于 0 的数字。");
+    }
+    node.strokeWeight = Number(options.strokeWeight);
+  }
+
+  if (options.opacity !== undefined && "opacity" in node) {
+    if (!Number.isFinite(options.opacity) || Number(options.opacity) < 0 || Number(options.opacity) > 1) {
+      throw new Error("opacity 必须是 0 到 1 之间的数字。");
+    }
+    node.opacity = Number(options.opacity);
+  }
+}
+
+function getCommonParent(nodes: any[]) {
+  if (!nodes.length) {
+    throw new Error("当前没有可处理的节点。");
+  }
+
+  const parent = nodes[0].parent;
+  if (!parent || !supportsChildren(parent)) {
+    throw new Error("当前 selection 缺少可写父级，无法执行该操作。");
+  }
+
+  for (const node of nodes) {
+    if (node.parent !== parent) {
+      throw new Error("当前 selection 的节点不在同一个父级下，无法执行该操作。");
+    }
+  }
+
+  return parent;
+}
+
+function getInsertionIndex(parent: any, nodes: any[]) {
+  const indexes = nodes
+    .map((node) => parent.children.indexOf(node))
+    .filter((index: number) => index >= 0);
+  return indexes.length ? Math.min(...indexes) : parent.children.length;
+}
+
+function getNodeBounds(node: any) {
+  if (
+    !supportsPosition(node) ||
+    typeof node.width !== "number" ||
+    typeof node.height !== "number"
+  ) {
+    throw new Error(`${node.name || node.id} 缺少可计算边界的几何信息。`);
+  }
+
+  return {
+    x: node.x,
+    y: node.y,
+    width: node.width,
+    height: node.height,
+  };
+}
+
+function groupNodes(nodes: any[], name?: string) {
+  if (nodes.length < 2) {
+    throw new Error("分组至少需要 2 个节点。");
+  }
+
+  const parent = getCommonParent(nodes);
+  const group = figma.group(nodes, parent, getInsertionIndex(parent, nodes));
+  if (name && name.trim()) {
+    group.name = name.trim();
+  }
+
+  return group;
+}
+
+function frameNodes(nodes: any[], options?: { name?: string; padding?: number }) {
+  if (nodes.length < 2) {
+    throw new Error("包裹 Frame 至少需要 2 个节点。");
+  }
+
+  const parent = getCommonParent(nodes);
+  const padding = Math.max(0, Number(options?.padding ?? 0));
+  const insertionIndex = getInsertionIndex(parent, nodes);
+  const frame = figma.createFrame();
+  parent.insertChild(insertionIndex, frame);
+
+  const bounds = nodes.map((node) => ({
+    node,
+    box: getNodeBounds(node),
+  }));
+  const minX = Math.min(...bounds.map((entry) => entry.box.x));
+  const minY = Math.min(...bounds.map((entry) => entry.box.y));
+  const maxX = Math.max(...bounds.map((entry) => entry.box.x + entry.box.width));
+  const maxY = Math.max(...bounds.map((entry) => entry.box.y + entry.box.height));
+
+  frame.x = minX - padding;
+  frame.y = minY - padding;
+  frame.resize(maxX - minX + padding * 2, maxY - minY + padding * 2);
+
+  for (const entry of bounds) {
+    frame.appendChild(entry.node);
+    entry.node.x = entry.box.x - frame.x;
+    entry.node.y = entry.box.y - frame.y;
+  }
+
+  if (options?.name && options.name.trim()) {
+    frame.name = options.name.trim();
+  }
+
+  return frame;
+}
+
+function supportsText(node: any) {
+  return node.type === "TEXT" && "characters" in node;
+}
+
+function getPrimaryFontName(node: any) {
+  if (!supportsText(node)) {
+    return null;
+  }
+
+  if (node.fontName && node.fontName !== figma.mixed) {
+    return node.fontName;
+  }
+
+  if (typeof node.getRangeAllFontNames === "function" && typeof node.characters === "string") {
+    const fonts = node.getRangeAllFontNames(0, node.characters.length);
+    if (Array.isArray(fonts) && fonts.length > 0) {
+      return fonts[0];
+    }
+  }
+
+  return null;
+}
+
+async function loadNodeFonts(node: any) {
+  if (!supportsText(node)) {
+    return;
+  }
+
+  const fontsToLoad: any[] = [];
+  if (node.fontName && node.fontName !== figma.mixed) {
+    fontsToLoad.push(node.fontName);
+  } else if (typeof node.getRangeAllFontNames === "function" && typeof node.characters === "string") {
+    fontsToLoad.push(...node.getRangeAllFontNames(0, node.characters.length));
+  }
+
+  const seen = new Set<string>();
+  for (const font of fontsToLoad) {
+    if (!font || font === figma.mixed) {
+      continue;
+    }
+
+    const key = `${font.family}::${font.style}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    await figma.loadFontAsync(font);
+    seen.add(key);
+  }
+}
+
+function normalizeFontWeightStyle(value: number | string) {
+  if (typeof value === "number") {
+    if (value >= 800) {
+      return "Extra Bold";
+    }
+    if (value >= 700) {
+      return "Bold";
+    }
+    if (value >= 600) {
+      return "Semi Bold";
+    }
+    if (value >= 500) {
+      return "Medium";
+    }
+    if (value >= 300) {
+      return "Regular";
+    }
+    return "Light";
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("字重不能为空。");
+  }
+  if (normalized.includes("semi") || normalized.includes("semibold") || normalized.includes("半粗")) {
+    return "Semi Bold";
+  }
+  if (normalized.includes("bold") || normalized.includes("粗体")) {
+    return "Bold";
+  }
+  if (normalized.includes("medium") || normalized.includes("中字")) {
+    return "Medium";
+  }
+  if (normalized.includes("light") || normalized.includes("细体")) {
+    return "Light";
+  }
+  if (normalized.includes("regular") || normalized.includes("normal") || normalized.includes("常规")) {
+    return "Regular";
+  }
+  if (normalized.includes("extra bold")) {
+    return "Extra Bold";
+  }
+
+  return value;
+}
+
+async function setTextContent(node: any, value: string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  await loadNodeFonts(node);
+  node.characters = value;
+  return true;
+}
+
+async function setTextFontSize(node: any, value: number) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  await loadNodeFonts(node);
+  node.fontSize = value;
+  return true;
+}
+
+async function setTextFontFamily(node: any, family: string, style?: string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  const primaryFont = getPrimaryFontName(node);
+  const targetFont = {
+    family,
+    style: style || primaryFont?.style || "Regular",
+  };
+
+  await figma.loadFontAsync(targetFont);
+  node.fontName = targetFont;
+  return true;
+}
+
+async function setTextFontWeight(node: any, value: number | string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  const primaryFont = getPrimaryFontName(node);
+  if (!primaryFont) {
+    throw new Error("当前文本节点缺少可用字体信息。");
+  }
+
+  const targetFont = {
+    family: primaryFont.family,
+    style: String(normalizeFontWeightStyle(value)),
+  };
+
+  await figma.loadFontAsync(targetFont);
+  node.fontName = targetFont;
+  return true;
+}
+
+function setTextColor(node: any, hex: string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  node.fills = [createSolidPaint(hex)];
+  node.fillStyleId = "";
+  return true;
+}
+
+async function setTextLineHeight(node: any, value: number) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  await loadNodeFonts(node);
+  node.lineHeight = { value, unit: "PIXELS" };
+  return true;
+}
+
+async function setTextLetterSpacing(node: any, value: number) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  await loadNodeFonts(node);
+  node.letterSpacing = { value, unit: "PIXELS" };
+  return true;
+}
+
+function normalizeTextAlignment(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "left" || normalized === "左对齐") return "LEFT";
+  if (normalized === "center" || normalized === "居中" || normalized === "居中对齐") return "CENTER";
+  if (normalized === "right" || normalized === "右对齐") return "RIGHT";
+  if (normalized === "justified" || normalized === "两端对齐") return "JUSTIFIED";
+  throw new Error(`不支持的文本对齐值: ${value}`);
+}
+
+function setTextAlignment(node: any, value: string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  node.textAlignHorizontal = normalizeTextAlignment(value);
   return true;
 }
 
@@ -198,6 +883,79 @@ async function upsertPaintStyle(name: string, hex: string, applyToSelection?: bo
     changedNodeIds,
     warnings,
   };
+}
+
+async function upsertTextStyle(
+  name: string,
+  fontFamily: string,
+  fontSize: number,
+  fontStyle?: string,
+  textColorHex?: string,
+) {
+  const targetFont = {
+    family: fontFamily,
+    style: fontStyle || "Regular",
+  };
+  await figma.loadFontAsync(targetFont);
+
+  const localStyles = await figma.getLocalTextStylesAsync();
+  let style = localStyles.find((item: any) => item.name === name);
+
+  if (!style) {
+    style = figma.createTextStyle();
+    style.name = name;
+  }
+
+  style.fontName = targetFont;
+  style.fontSize = fontSize;
+  style.fills = [createSolidPaint(textColorHex || "#111111")];
+
+  return {
+    style,
+  };
+}
+
+function applyPaintStyleToNode(node: any, styleId: string) {
+  if (!supportsFills(node)) {
+    return false;
+  }
+
+  node.fillStyleId = styleId;
+  return true;
+}
+
+function applyTextStyleToNode(node: any, styleId: string) {
+  if (!supportsText(node)) {
+    return false;
+  }
+
+  node.textStyleId = styleId;
+  return true;
+}
+
+function detachStyleFromNode(node: any, styleType: "fill" | "stroke" | "text") {
+  switch (styleType) {
+    case "fill":
+      if (!supportsFills(node)) {
+        return false;
+      }
+      node.fillStyleId = "";
+      return true;
+    case "stroke":
+      if (!supportsStrokes(node)) {
+        return false;
+      }
+      node.strokeStyleId = "";
+      return true;
+    case "text":
+      if (!supportsText(node)) {
+        return false;
+      }
+      node.textStyleId = "";
+      return true;
+    default:
+      return styleType satisfies never;
+  }
 }
 
 async function upsertColorVariable(
@@ -275,13 +1033,46 @@ async function upsertColorVariable(
   };
 }
 
-function getTargetNodes(command: FigmaCapabilityCommand): ReturnType<typeof getSelection> {
+async function getTargetNodes(
+  command: FigmaCapabilityCommand,
+  batchSource?: string,
+): Promise<ReturnType<typeof getSelection>> {
   const selection = getSelection();
   if (!command.nodeIds || command.nodeIds.length === 0) {
+    if (batchSource === "codex") {
+      const desc = getPluginCapabilityDescriptor(command.capabilityId);
+      if (desc?.requiresSelection) {
+        throw new Error(
+          `外部命令必须指定 nodeIds。当前有 ${selection.length} 个选中节点，请在命令中添加 nodeIds 以明确目标。`,
+        );
+      }
+    }
     return selection;
   }
   const idSet = new Set(command.nodeIds);
   const filtered = selection.filter((node: (typeof selection)[number]) => idSet.has(node.id));
+  if (filtered.length) {
+    return filtered;
+  }
+
+  if (batchSource === "codex") {
+    const resolved = (
+      await Promise.all(
+        command.nodeIds.map(async (nodeId) => {
+          try {
+            return (await figma.getNodeByIdAsync(nodeId)) as (typeof selection)[number] | null;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter(Boolean) as ReturnType<typeof getSelection>;
+
+    if (resolved.length) {
+      return resolved;
+    }
+  }
+
   if (!filtered.length) {
     throw new Error(
       `指定的 nodeIds 在当前 selection 中未找到匹配节点。nodeIds: ${command.nodeIds.join(", ")}`,
@@ -292,6 +1083,7 @@ function getTargetNodes(command: FigmaCapabilityCommand): ReturnType<typeof getS
 
 async function runCapabilityCommand(
   command: FigmaCapabilityCommand,
+  batchSource?: string,
 ): Promise<PluginCommandExecutionResult> {
   const descriptor = getPluginCapabilityDescriptor(command.capabilityId);
   if (!descriptor) {
@@ -306,6 +1098,50 @@ async function runCapabilityCommand(
     });
   }
 
+  // Capture undo snapshot before execution (for property-modifying capabilities)
+  let undoEntry: UndoEntry | null = null;
+  if (!NON_UNDOABLE_CAPABILITIES.has(command.capabilityId) && !CREATION_CAPABILITIES.has(command.capabilityId)) {
+    try {
+      const targetNodes = await getTargetNodes(command, batchSource);
+      const snapshots: PropertySnapshot[] = [];
+      for (const node of targetNodes) {
+        const props = snapshotNodeProperties(node, command.capabilityId);
+        if (props) {
+          snapshots.push({ nodeId: node.id, properties: props });
+        }
+      }
+      if (snapshots.length > 0) {
+        undoEntry = { capabilityId: command.capabilityId, snapshots, createdNodeIds: [] };
+      }
+    } catch {
+      // If getTargetNodes throws (e.g., no selection), let the main switch handle it
+    }
+  }
+
+  const result = await runCapabilityCommandInner(command, batchSource);
+
+  // Push undo entry if command succeeded
+  if (result.ok) {
+    if (undoEntry) {
+      undoStack.push(undoEntry);
+      if (undoStack.length > UNDO_STACK_MAX) undoStack.shift();
+    } else if (CREATION_CAPABILITIES.has(command.capabilityId) && result.changedNodeIds.length > 0) {
+      undoStack.push({
+        capabilityId: command.capabilityId,
+        snapshots: [],
+        createdNodeIds: result.changedNodeIds,
+      });
+      if (undoStack.length > UNDO_STACK_MAX) undoStack.shift();
+    }
+  }
+
+  return result;
+}
+
+async function runCapabilityCommandInner(
+  command: FigmaCapabilityCommand,
+  batchSource?: string,
+): Promise<PluginCommandExecutionResult> {
   switch (command.capabilityId) {
     case "selection.refresh":
       return successResult(command.capabilityId, "已刷新当前 selection。");
@@ -315,7 +1151,7 @@ async function runCapabilityCommand(
       const paint = createSolidPaint(payload.hex);
       const changedNodeIds: string[] = [];
 
-      for (const node of getTargetNodes(command)) {
+      for (const node of await getTargetNodes(command, batchSource)) {
         try {
           if (applyFillToNode(node, paint)) {
             changedNodeIds.push(node.id);
@@ -338,12 +1174,34 @@ async function runCapabilityCommand(
       );
     }
 
+    case "fills.clear-fill": {
+      const changedNodeIds: string[] = [];
+
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (clearFillOnNode(node)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可清空 fill 的节点。");
+      }
+
+      return successResult(command.capabilityId, `已清空 ${changedNodeIds.length} 个节点的 fill。`, {
+        changedNodeIds,
+      });
+    }
+
     case "strokes.set-stroke": {
       const payload = command.payload as { hex: string };
       const paint = createSolidPaint(payload.hex);
       const changedNodeIds: string[] = [];
 
-      for (const node of getTargetNodes(command)) {
+      for (const node of await getTargetNodes(command, batchSource)) {
         try {
           if (applyStrokeToNode(node, paint)) {
             changedNodeIds.push(node.id);
@@ -366,10 +1224,165 @@ async function runCapabilityCommand(
       );
     }
 
+    case "strokes.clear-stroke": {
+      const changedNodeIds: string[] = [];
+
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (clearStrokeOnNode(node)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可清空 stroke 的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已清空 ${changedNodeIds.length} 个节点的 stroke。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "strokes.set-weight": {
+      const payload = command.payload as { value: number };
+      if (!Number.isFinite(payload.value) || payload.value < 0) {
+        throw new Error("描边粗细必须是大于等于 0 的数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          const result = applyStrokeWeightToNode(node, payload.value);
+          if (result.changed) {
+            changedNodeIds.push(node.id);
+          } else if (result.warning) {
+            warnings.push(result.warning);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可写描边粗细的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点的描边粗细设为 ${payload.value}px。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "effects.set-shadow": {
+      const payload = command.payload as {
+        offsetX: number;
+        offsetY: number;
+        blur: number;
+        spread?: number;
+        colorHex?: string;
+        opacity?: number;
+      };
+      if (
+        !Number.isFinite(payload.offsetX) ||
+        !Number.isFinite(payload.offsetY) ||
+        !Number.isFinite(payload.blur)
+      ) {
+        throw new Error("阴影参数必须包含有效的 offsetX、offsetY 和 blur 数值。");
+      }
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (setShadowOnNode(node, payload)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可写阴影效果的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点的阴影更新为 offset(${payload.offsetX}, ${payload.offsetY}) blur ${payload.blur}。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "effects.set-layer-blur": {
+      const payload = command.payload as { radius: number };
+      if (!Number.isFinite(payload.radius) || payload.radius < 0) {
+        throw new Error("图层模糊半径必须是大于等于 0 的数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (setLayerBlurOnNode(node, payload.radius)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可写图层模糊的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点的图层模糊设为 ${payload.radius}px。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "effects.clear-effects": {
+      const changedNodeIds: string[] = [];
+
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (clearEffectsOnNode(node)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可清空 effects 的节点。");
+      }
+
+      return successResult(command.capabilityId, `已清空 ${changedNodeIds.length} 个节点的效果。`, {
+        changedNodeIds,
+      });
+    }
+
     case "geometry.set-radius": {
       const payload = command.payload as { value: number };
       const changedNodeIds: string[] = [];
-      for (const node of getTargetNodes(command)) {
+      for (const node of await getTargetNodes(command, batchSource)) {
         try {
           if (applyRadiusToNode(node, payload.value)) {
             changedNodeIds.push(node.id);
@@ -392,10 +1405,75 @@ async function runCapabilityCommand(
       );
     }
 
+    case "geometry.set-size": {
+      const payload = command.payload as { width: number; height: number };
+      if (
+        !Number.isFinite(payload.width) ||
+        !Number.isFinite(payload.height) ||
+        payload.width <= 0 ||
+        payload.height <= 0
+      ) {
+        throw new Error("宽高必须是大于 0 的数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (resizeNode(node, payload.width, payload.height)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore nodes that cannot be resized.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可改尺寸的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点的尺寸设为 ${payload.width} x ${payload.height}px。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "geometry.set-position": {
+      const payload = command.payload as { x: number; y: number };
+      if (!Number.isFinite(payload.x) || !Number.isFinite(payload.y)) {
+        throw new Error("位置必须包含有效的 x 和 y 数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (moveNode(node, payload.x, payload.y)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore nodes that cannot be moved.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可改位置的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点移动到 (${payload.x}, ${payload.y})。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
     case "nodes.set-opacity": {
       const payload = command.payload as { value: number };
       const changedNodeIds: string[] = [];
-      for (const node of getTargetNodes(command)) {
+      for (const node of await getTargetNodes(command, batchSource)) {
         try {
           if (applyOpacityToNode(node, payload.value)) {
             changedNodeIds.push(node.id);
@@ -412,6 +1490,943 @@ async function runCapabilityCommand(
       return successResult(
         command.capabilityId,
         `已将 ${changedNodeIds.length} 个节点的透明度设为 ${payload.value}%。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "nodes.rename": {
+      const payload = command.payload as { name: string };
+      const name = String(payload.name || "").trim();
+      if (!name) {
+        throw new Error("节点名称不能为空。");
+      }
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (renameNode(node, name)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable names.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可重命名的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个节点重命名为 ${name}。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "nodes.duplicate": {
+      const payload = command.payload as { offsetX?: number; offsetY?: number };
+      const offsetX = Number.isFinite(payload.offsetX) ? Number(payload.offsetX) : 24;
+      const offsetY = Number.isFinite(payload.offsetY) ? Number(payload.offsetY) : 24;
+
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          const duplicated = duplicateNode(node, offsetX, offsetY);
+          if (duplicated) {
+            changedNodeIds.push(duplicated.id);
+          }
+        } catch {
+          // Ignore nodes that cannot be duplicated.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可复制的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已复制 ${changedNodeIds.length} 个节点，并偏移 (${offsetX}, ${offsetY})。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "nodes.group": {
+      const payload = command.payload as { name?: string };
+      const group = groupNodes(await getTargetNodes(command, batchSource), payload.name);
+
+      return successResult(
+        command.capabilityId,
+        `已将当前 selection 分组为 ${group.name}。`,
+        {
+          changedNodeIds: [group.id],
+        },
+      );
+    }
+
+    case "nodes.frame-selection": {
+      const payload = command.payload as { name?: string; padding?: number };
+      if (payload.padding !== undefined && (!Number.isFinite(payload.padding) || payload.padding < 0)) {
+        throw new Error("Frame padding 必须是大于等于 0 的数字。");
+      }
+
+      const frame = frameNodes(await getTargetNodes(command, batchSource), payload);
+
+      return successResult(
+        command.capabilityId,
+        `已使用 Frame 包裹当前 selection${payload.name ? `，名称为 ${frame.name}` : ""}。`,
+        {
+          changedNodeIds: [frame.id],
+        },
+      );
+    }
+
+    case "assets.export-node-image": {
+      const payload = command.payload as {
+        format?: "PNG";
+        constraint?: { type: "WIDTH" | "HEIGHT" | "SCALE"; value: number };
+        preferOriginalBytes?: boolean;
+      };
+      const targets = await getTargetNodes(command, batchSource);
+      const exportedImages = [];
+      const warnings: string[] = [];
+
+      for (const node of targets) {
+        const artifact = await exportNodeImageArtifact(node, {
+          preferOriginalBytes: payload.preferOriginalBytes,
+          constraint: payload.constraint,
+        });
+        if (!artifact) {
+          warnings.push(`${node.name || node.id} 当前无法导出为图片。`);
+          continue;
+        }
+        exportedImages.push(artifact);
+      }
+
+      if (!exportedImages.length) {
+        throw new Error(warnings[0] || "没有成功导出任何节点图片。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已导出 ${exportedImages.length} 个节点图片。`,
+        {
+          exportedImages,
+          warnings,
+        },
+      );
+    }
+
+    case "reconstruction.apply-raster-reference": {
+      const payload = command.payload as {
+        referenceNodeId: string;
+        resultName?: string;
+        replaceTargetContents?: boolean;
+        resizeTargetToReference?: boolean;
+      };
+      if (!payload.referenceNodeId || !payload.referenceNodeId.trim()) {
+        throw new Error("referenceNodeId 不能为空。");
+      }
+
+      const targets = await getTargetNodes(command, batchSource);
+      if (targets.length !== 1) {
+        throw new Error("raster reconstruction 需要且只支持一个目标 Frame。");
+      }
+
+      const target = targets[0];
+      if (target.type !== "FRAME") {
+        throw new Error(`raster reconstruction 目标节点必须是 FRAME，当前为 ${target.type}。`);
+      }
+
+      const referenceNode = await figma.getNodeByIdAsync(payload.referenceNodeId);
+      if (!referenceNode) {
+        throw new Error(`referenceNodeId "${payload.referenceNodeId}" 未找到。`);
+      }
+
+      const artifact = await exportNodeImageArtifact(referenceNode, {
+        preferOriginalBytes: true,
+      });
+      if (!artifact) {
+        throw new Error("参考节点无法导出为图片。");
+      }
+
+      if (payload.replaceTargetContents !== false && supportsChildren(target)) {
+        for (const child of [...target.children]) {
+          child.remove();
+        }
+      }
+
+      if (payload.resizeTargetToReference !== false) {
+        if (typeof artifact.width !== "number" || typeof artifact.height !== "number" || artifact.width <= 0 || artifact.height <= 0) {
+          throw new Error("参考图片尺寸无效，无法调整目标 Frame。");
+        }
+        target.resize(artifact.width, artifact.height);
+      }
+
+      const { bytes } = decodeDataUrl(artifact.dataUrl);
+      const image = figma.createImage(bytes);
+      const rasterNode = figma.createRectangle();
+      target.appendChild(rasterNode);
+      rasterNode.name = payload.resultName?.trim() || "AD Raster";
+      rasterNode.resize(
+        Math.max(1, Math.round(typeof target.width === "number" ? target.width : artifact.width)),
+        Math.max(1, Math.round(typeof target.height === "number" ? target.height : artifact.height)),
+      );
+      rasterNode.x = 0;
+      rasterNode.y = 0;
+      if ("strokes" in rasterNode) {
+        rasterNode.strokes = [];
+      }
+      if ("cornerRadius" in rasterNode) {
+        rasterNode.cornerRadius = 0;
+      }
+      if ("layoutMode" in target && target.layoutMode !== "NONE" && "layoutPositioning" in rasterNode) {
+        rasterNode.layoutPositioning = "ABSOLUTE";
+      }
+      if ("clipsContent" in target) {
+        target.clipsContent = true;
+      }
+      rasterNode.fills = [
+        {
+          type: "IMAGE",
+          imageHash: image.hash,
+          scaleMode: "FILL",
+          visible: true,
+          opacity: 1,
+        },
+      ];
+
+      return successResult(
+        command.capabilityId,
+        `已将参考图精确写入目标 Frame "${target.name}"。`,
+        {
+          changedNodeIds: [rasterNode.id],
+        },
+      );
+    }
+
+    case "nodes.delete": {
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+
+      // nodes.delete supports deleting by nodeIds directly (not just selection)
+      const targetIds = command.nodeIds && command.nodeIds.length > 0
+        ? command.nodeIds
+        : (await getTargetNodes(command, batchSource)).map((n: any) => n.id);
+
+      for (const nodeId of targetIds) {
+        try {
+          const node = await figma.getNodeByIdAsync(nodeId);
+          if (!node) {
+            warnings.push(`节点 ${nodeId} 未找到。`);
+            continue;
+          }
+          if (node.parent) {
+            changedNodeIds.push(node.id);
+            node.remove();
+          } else {
+            warnings.push(`节点 ${nodeId} (${(node as any).name}) 是根节点，无法删除。`);
+          }
+        } catch (error) {
+          warnings.push(
+            `删除节点 ${nodeId} 失败: ${error instanceof Error ? error.message : "未知错误"}`,
+          );
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("没有成功删除任何节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已删除 ${changedNodeIds.length} 个节点。`,
+        { changedNodeIds, warnings },
+      );
+    }
+
+    case "nodes.create-frame": {
+      const payload = command.payload as {
+        name?: string;
+        width: number;
+        height: number;
+        x?: number;
+        y?: number;
+        fillHex?: string;
+        cornerRadius?: number;
+        parentNodeId?: string;
+      };
+
+      if (
+        !Number.isFinite(payload.width) ||
+        !Number.isFinite(payload.height) ||
+        payload.width <= 0 ||
+        payload.height <= 0
+      ) {
+        throw new Error("Frame 的宽高必须是大于 0 的数字。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const frame = figma.createFrame();
+      parent.appendChild(frame);
+
+      frame.resize(payload.width, payload.height);
+
+      if (payload.name && payload.name.trim()) {
+        frame.name = payload.name.trim();
+      }
+
+      if (Number.isFinite(payload.x)) {
+        frame.x = payload.x!;
+      }
+      if (Number.isFinite(payload.y)) {
+        frame.y = payload.y!;
+      }
+
+      if (payload.fillHex) {
+        frame.fills = [createSolidPaint(payload.fillHex)];
+      }
+
+      if (payload.cornerRadius !== undefined) {
+        if (!Number.isFinite(payload.cornerRadius) || payload.cornerRadius < 0) {
+          throw new Error("cornerRadius 必须是大于等于 0 的数字。");
+        }
+        frame.cornerRadius = payload.cornerRadius;
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已创建 Frame "${frame.name}" (${payload.width} × ${payload.height})。`,
+        {
+          changedNodeIds: [frame.id],
+        },
+      );
+    }
+
+    case "nodes.create-text": {
+      const payload = command.payload as {
+        name?: string;
+        content: string;
+        fontFamily?: string;
+        fontStyle?: string;
+        fontSize?: number;
+        fontWeight?: number | string;
+        colorHex?: string;
+        lineHeight?: number;
+        letterSpacing?: number;
+        alignment?: "left" | "center" | "right" | "justified";
+        x?: number;
+        y?: number;
+        parentNodeId?: string;
+        analysisRefId?: string;
+      };
+
+      if (!String(payload.content || "").length) {
+        throw new Error("文本内容不能为空。");
+      }
+
+      const fontFamily = payload.fontFamily?.trim() || "Inter";
+      let fontStyle = payload.fontStyle?.trim() || "Regular";
+
+      if (payload.fontWeight !== undefined && !payload.fontStyle) {
+        fontStyle = String(normalizeFontWeightStyle(payload.fontWeight));
+      }
+
+      const targetFont = { family: fontFamily, style: fontStyle };
+      await figma.loadFontAsync(targetFont);
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const textNode = figma.createText();
+      parent.appendChild(textNode);
+
+      if (payload.name && payload.name.trim()) {
+        textNode.name = payload.name.trim();
+      }
+
+      textNode.fontName = targetFont;
+      textNode.characters = payload.content;
+
+      if (payload.fontSize !== undefined) {
+        if (!Number.isFinite(payload.fontSize) || payload.fontSize <= 0) {
+          throw new Error("字号必须是大于 0 的数字。");
+        }
+        textNode.fontSize = payload.fontSize;
+      }
+
+      if (payload.colorHex) {
+        textNode.fills = [createSolidPaint(payload.colorHex)];
+      }
+
+      if (payload.lineHeight !== undefined) {
+        if (!Number.isFinite(payload.lineHeight) || payload.lineHeight <= 0) {
+          throw new Error("行高必须是大于 0 的数字。");
+        }
+        textNode.lineHeight = { value: payload.lineHeight, unit: "PIXELS" };
+      }
+
+      if (payload.letterSpacing !== undefined) {
+        if (!Number.isFinite(payload.letterSpacing)) {
+          throw new Error("字距必须是有效数字。");
+        }
+        textNode.letterSpacing = { value: payload.letterSpacing, unit: "PIXELS" };
+      }
+
+      if (payload.alignment) {
+        textNode.textAlignHorizontal = normalizeTextAlignment(payload.alignment);
+      }
+
+      if (Number.isFinite(payload.x)) {
+        textNode.x = payload.x!;
+      }
+      if (Number.isFinite(payload.y)) {
+        textNode.y = payload.y!;
+      }
+
+      const preview =
+        payload.content.length > 30
+          ? payload.content.substring(0, 30) + "…"
+          : payload.content;
+
+      return successResult(
+        command.capabilityId,
+        `已创建文本节点 "${textNode.name}" 内容为 "${preview}"。`,
+        {
+          changedNodeIds: [textNode.id],
+        },
+      );
+    }
+
+    case "nodes.create-rectangle": {
+      const payload = command.payload as {
+        name?: string;
+        width: number;
+        height: number;
+        x?: number;
+        y?: number;
+        fillHex?: string;
+        strokeHex?: string;
+        strokeWeight?: number;
+        cornerRadius?: number;
+        opacity?: number;
+        parentNodeId?: string;
+      };
+      if (!Number.isFinite(payload.width) || payload.width <= 0 || !Number.isFinite(payload.height) || payload.height <= 0) {
+        throw new Error("Rectangle 的宽高必须是大于 0 的数字。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const node = figma.createRectangle();
+      parent.appendChild(node);
+      node.resize(payload.width, payload.height);
+      if (payload.name && payload.name.trim()) {
+        node.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.x)) {
+        node.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        node.y = Number(payload.y);
+      }
+      if (payload.cornerRadius !== undefined) {
+        if (!Number.isFinite(payload.cornerRadius) || payload.cornerRadius < 0) {
+          throw new Error("cornerRadius 必须是大于等于 0 的数字。");
+        }
+        node.cornerRadius = payload.cornerRadius;
+      }
+      applyFillStrokeOpacity(node, payload);
+      return successResult(
+        command.capabilityId,
+        `已创建矩形节点 "${node.name}"。`,
+        { changedNodeIds: [node.id] },
+      );
+    }
+
+    case "nodes.create-ellipse": {
+      const payload = command.payload as {
+        name?: string;
+        width: number;
+        height: number;
+        x?: number;
+        y?: number;
+        fillHex?: string;
+        strokeHex?: string;
+        strokeWeight?: number;
+        opacity?: number;
+        parentNodeId?: string;
+      };
+      if (!Number.isFinite(payload.width) || payload.width <= 0 || !Number.isFinite(payload.height) || payload.height <= 0) {
+        throw new Error("Ellipse 的宽高必须是大于 0 的数字。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const node = figma.createEllipse();
+      parent.appendChild(node);
+      node.resize(payload.width, payload.height);
+      if (payload.name && payload.name.trim()) {
+        node.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.x)) {
+        node.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        node.y = Number(payload.y);
+      }
+      applyFillStrokeOpacity(node, payload);
+      return successResult(
+        command.capabilityId,
+        `已创建椭圆节点 "${node.name}"。`,
+        { changedNodeIds: [node.id] },
+      );
+    }
+
+    case "nodes.create-line": {
+      const payload = command.payload as {
+        name?: string;
+        width: number;
+        height?: number;
+        x?: number;
+        y?: number;
+        strokeHex?: string;
+        strokeWeight?: number;
+        opacity?: number;
+        rotation?: number;
+        parentNodeId?: string;
+      };
+      if (!Number.isFinite(payload.width) || payload.width <= 0) {
+        throw new Error("Line 的 width 必须是大于 0 的数字。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const node = figma.createLine();
+      parent.appendChild(node);
+      node.resize(payload.width, Number.isFinite(payload.height) ? Math.max(1, Number(payload.height)) : 1);
+      if (payload.name && payload.name.trim()) {
+        node.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.x)) {
+        node.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        node.y = Number(payload.y);
+      }
+      if (Number.isFinite(payload.rotation)) {
+        node.rotation = Number(payload.rotation);
+      }
+      applyFillStrokeOpacity(node, {
+        strokeHex: payload.strokeHex || "#000000",
+        strokeWeight: payload.strokeWeight ?? 1,
+        opacity: payload.opacity,
+      });
+      return successResult(
+        command.capabilityId,
+        `已创建线段节点 "${node.name}"。`,
+        { changedNodeIds: [node.id] },
+      );
+    }
+
+    case "nodes.create-svg": {
+      const payload = command.payload as {
+        name?: string;
+        svgMarkup: string;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        opacity?: number;
+        parentNodeId?: string;
+      };
+      if (!String(payload.svgMarkup || "").trim()) {
+        throw new Error("svgMarkup 不能为空。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const node = figma.createNodeFromSvg(payload.svgMarkup);
+      if (node.parent !== parent) {
+        parent.appendChild(node);
+      }
+      if (payload.name && payload.name.trim()) {
+        node.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.width) && Number.isFinite(payload.height) && "resize" in node) {
+        node.resize(Number(payload.width), Number(payload.height));
+      }
+      if (Number.isFinite(payload.x)) {
+        node.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        node.y = Number(payload.y);
+      }
+      if (payload.opacity !== undefined && "opacity" in node) {
+        if (!Number.isFinite(payload.opacity) || payload.opacity < 0 || payload.opacity > 1) {
+          throw new Error("opacity 必须是 0 到 1 之间的数字。");
+        }
+        node.opacity = Number(payload.opacity);
+      }
+      return successResult(
+        command.capabilityId,
+        `已创建 SVG 节点 "${node.name}"。`,
+        { changedNodeIds: [node.id] },
+      );
+    }
+
+    case "text.set-content": {
+      const payload = command.payload as { value: string };
+      if (!String(payload.value || "").length) {
+        throw new Error("文本内容不能为空。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextContent(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改文字内容的文本节点。");
+      }
+
+      return successResult(command.capabilityId, `已更新 ${changedNodeIds.length} 个文本节点的内容。`, {
+        changedNodeIds,
+        warnings,
+      });
+    }
+
+    case "text.set-font-size": {
+      const payload = command.payload as { value: number };
+      if (!Number.isFinite(payload.value) || payload.value <= 0) {
+        throw new Error("字号必须是大于 0 的数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextFontSize(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改字号的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点的字号设为 ${payload.value}px。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "text.set-font-family": {
+      const payload = command.payload as { family: string; style?: string };
+      if (!String(payload.family || "").trim()) {
+        throw new Error("字体族不能为空。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextFontFamily(node, payload.family.trim(), payload.style?.trim())) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改字体族的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点的字体改为 ${payload.family.trim()}。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "text.set-font-weight": {
+      const payload = command.payload as { value: number | string };
+      if (payload.value === undefined || payload.value === null || `${payload.value}`.trim() === "") {
+        throw new Error("字重不能为空。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextFontWeight(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改字重的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已更新 ${changedNodeIds.length} 个文本节点的字重。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "text.set-text-color": {
+      const payload = command.payload as { hex: string };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (setTextColor(node, payload.hex)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可改文字颜色的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点的颜色改为 ${normalizeHex(payload.hex)}。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "text.set-line-height": {
+      const payload = command.payload as { value: number };
+      if (!Number.isFinite(payload.value) || payload.value <= 0) {
+        throw new Error("行高必须是大于 0 的数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextLineHeight(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改行高的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点的行高设为 ${payload.value}px。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "text.set-letter-spacing": {
+      const payload = command.payload as { value: number };
+      if (!Number.isFinite(payload.value)) {
+        throw new Error("字距必须是有效数字。");
+      }
+
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (await setTextLetterSpacing(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改字距的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点的字距设为 ${payload.value}px。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "text.set-alignment": {
+      const payload = command.payload as { value: "left" | "center" | "right" | "justified" };
+      const changedNodeIds: string[] = [];
+      const warnings: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (setTextAlignment(node, payload.value)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch (error) {
+          warnings.push(`${node.name || node.id}: ${error instanceof Error ? error.message : "未知错误"}`);
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error(warnings[0] || "当前 selection 中没有可改对齐的文本节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将 ${changedNodeIds.length} 个文本节点设为 ${payload.value} 对齐。`,
+        {
+          changedNodeIds,
+          warnings,
+        },
+      );
+    }
+
+    case "styles.upsert-text-style": {
+      const payload = command.payload as {
+        name: string;
+        fontFamily: string;
+        fontStyle?: string;
+        fontSize: number;
+        textColorHex?: string;
+      };
+      if (!String(payload.name || "").trim()) {
+        throw new Error("text style 名称不能为空。");
+      }
+      if (!String(payload.fontFamily || "").trim()) {
+        throw new Error("text style 字体族不能为空。");
+      }
+      if (!Number.isFinite(payload.fontSize) || payload.fontSize <= 0) {
+        throw new Error("text style 字号必须是大于 0 的数字。");
+      }
+
+      const result = await upsertTextStyle(
+        payload.name.trim(),
+        payload.fontFamily.trim(),
+        payload.fontSize,
+        payload.fontStyle?.trim(),
+        payload.textColorHex,
+      );
+
+      return successResult(command.capabilityId, `已更新本地文字样式 ${result.style.name}。`, {
+        createdStyleIds: [result.style.id],
+      });
+    }
+
+    case "styles.apply-style": {
+      const payload = command.payload as {
+        styleType: "paint" | "text";
+        styleName: string;
+      };
+      if (!String(payload.styleName || "").trim()) {
+        throw new Error("要应用的样式名称不能为空。");
+      }
+
+      const changedNodeIds: string[] = [];
+      if (payload.styleType === "paint") {
+        const localStyles = await figma.getLocalPaintStylesAsync();
+        const style = localStyles.find((item: any) => item.name === payload.styleName);
+        if (!style) {
+          throw new Error(`未找到本地 paint style: ${payload.styleName}`);
+        }
+
+        for (const node of await getTargetNodes(command, batchSource)) {
+          try {
+            if (applyPaintStyleToNode(node, style.id)) {
+              changedNodeIds.push(node.id);
+            }
+          } catch {
+            // Ignore non-editable overrides.
+          }
+        }
+      } else {
+        const localStyles = await figma.getLocalTextStylesAsync();
+        const style = localStyles.find((item: any) => item.name === payload.styleName);
+        if (!style) {
+          throw new Error(`未找到本地 text style: ${payload.styleName}`);
+        }
+
+        for (const node of await getTargetNodes(command, batchSource)) {
+          try {
+            if (applyTextStyleToNode(node, style.id)) {
+              changedNodeIds.push(node.id);
+            }
+          } catch {
+            // Ignore non-editable overrides.
+          }
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可应用该样式的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已将样式 ${payload.styleName} 应用到 ${changedNodeIds.length} 个节点。`,
+        {
+          changedNodeIds,
+        },
+      );
+    }
+
+    case "styles.detach-style": {
+      const payload = command.payload as {
+        styleType: "fill" | "stroke" | "text";
+      };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        try {
+          if (detachStyleFromNode(node, payload.styleType)) {
+            changedNodeIds.push(node.id);
+          }
+        } catch {
+          // Ignore non-editable overrides.
+        }
+      }
+
+      if (!changedNodeIds.length) {
+        throw new Error("当前 selection 中没有可解绑该样式的节点。");
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已从 ${changedNodeIds.length} 个节点解绑 ${payload.styleType} style。`,
         {
           changedNodeIds,
         },
@@ -470,6 +2485,87 @@ async function runCapabilityCommand(
       );
     }
 
+    case "undo.undo-last": {
+      if (undoStack.length === 0) {
+        throw new Error("撤销栈为空，没有可撤销的操作。");
+      }
+
+      const entry = undoStack.pop()!;
+      const restoredNodeIds: string[] = [];
+      const warnings: string[] = [];
+
+      // Restore property snapshots
+      for (const snapshot of entry.snapshots) {
+        try {
+          const node = await figma.getNodeByIdAsync(snapshot.nodeId) as any;
+          if (!node) {
+            warnings.push(`节点 ${snapshot.nodeId} 已不存在，跳过恢复。`);
+            continue;
+          }
+
+          // Load fonts before restoring text properties
+          if (supportsText(node) && (
+            "fontName" in snapshot.properties ||
+            "characters" in snapshot.properties ||
+            "fontSize" in snapshot.properties
+          )) {
+            await loadNodeFonts(node);
+            if (snapshot.properties.fontName) {
+              await figma.loadFontAsync(snapshot.properties.fontName);
+            }
+          }
+
+          for (const [key, value] of Object.entries(snapshot.properties)) {
+            if (key === "width" || key === "height") continue;
+            // Style ID properties require async setters in dynamic-page mode
+            if (key === "fillStyleId" && "setFillStyleIdAsync" in node) {
+              await node.setFillStyleIdAsync(value || "");
+            } else if (key === "strokeStyleId" && "setStrokeStyleIdAsync" in node) {
+              await node.setStrokeStyleIdAsync(value || "");
+            } else if (key === "textStyleId" && "setTextStyleIdAsync" in node) {
+              await node.setTextStyleIdAsync(value || "");
+            } else {
+              node[key] = value;
+            }
+          }
+
+          // Handle resize specially
+          if ("width" in snapshot.properties && "height" in snapshot.properties) {
+            if (supportsResize(node)) {
+              node.resize(snapshot.properties.width, snapshot.properties.height);
+            }
+          }
+
+          restoredNodeIds.push(snapshot.nodeId);
+        } catch (error) {
+          warnings.push(
+            `恢复节点 ${snapshot.nodeId} 失败: ${error instanceof Error ? error.message : "未知错误"}`,
+          );
+        }
+      }
+
+      // Delete created nodes
+      for (const nodeId of entry.createdNodeIds) {
+        try {
+          const node = await figma.getNodeByIdAsync(nodeId);
+          if (node && node.parent) {
+            node.remove();
+            restoredNodeIds.push(nodeId);
+          }
+        } catch (error) {
+          warnings.push(
+            `删除节点 ${nodeId} 失败: ${error instanceof Error ? error.message : "未知错误"}`,
+          );
+        }
+      }
+
+      return successResult(
+        command.capabilityId,
+        `已撤销 ${entry.capabilityId}，恢复了 ${restoredNodeIds.length} 个节点。`,
+        { changedNodeIds: restoredNodeIds, warnings },
+      );
+    }
+
     default:
       throw new Error(`不支持的能力命令: ${String((command as { capabilityId: string }).capabilityId)}`);
   }
@@ -477,6 +2573,12 @@ async function runCapabilityCommand(
 
 export function getRuntimeCapabilities(): PluginCapabilityDescriptor[] {
   return IMPLEMENTED_PLUGIN_CAPABILITIES;
+}
+
+export function getRuntimeFeatures(): PluginRuntimeFeatures {
+  return {
+    supportsExplicitNodeTargeting: true,
+  };
 }
 
 export async function runPluginCommandBatch(batch: FigmaPluginCommandBatch): Promise<BatchRunResult> {
@@ -490,7 +2592,7 @@ export async function runPluginCommandBatch(batch: FigmaPluginCommandBatch): Pro
     const command = normalizeLegacyCommand(rawCommand);
 
     try {
-      const result = await runCapabilityCommand(command);
+      const result = await runCapabilityCommand(command, batch.source);
       results.push(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知错误";

@@ -11,8 +11,11 @@
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build:plugins": "node scripts/build-figma-plugins.mjs",
+    "verify:plugin-ui-lock": "node scripts/verify-plugin-ui-lock.mjs",
+    "verify:plugins": "npm run verify:plugin-ui-lock && node --import tsx scripts/verify-plugin-smoke.mjs",
     "plugin:status": "node --import tsx scripts/plugin-bridge-cli.ts status",
     "plugin:preview": "node --import tsx scripts/plugin-bridge-cli.ts preview",
+    "plugin:reconstruct": "node --import tsx scripts/plugin-bridge-cli.ts reconstruct",
     "plugin:send": "node --import tsx scripts/plugin-bridge-cli.ts send",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json"

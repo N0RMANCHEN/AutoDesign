@@ -8,7 +8,24 @@ export type PluginNodeSummary = {
   fillable: boolean;
   fills: string[];
   fillStyleId: string | null;
+  width?: number | null;
+  height?: number | null;
   previewDataUrl?: string | null;
+  hasImageFill?: boolean;
+};
+
+export type PluginImageArtifact = {
+  kind: "node-image";
+  nodeId: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  dataUrl: string;
+  source: "image-fill-original" | "node-export";
+};
+
+export type PluginRuntimeFeatures = {
+  supportsExplicitNodeTargeting: boolean;
 };
 
 export type PluginBridgeSession = {
@@ -21,6 +38,7 @@ export type PluginBridgeSession = {
   status: "online" | "stale";
   lastSeenAt: string;
   lastHandshakeAt: string;
+  runtimeFeatures: PluginRuntimeFeatures;
   capabilities: PluginCapabilityDescriptor[];
   selection: PluginNodeSummary[];
 };
@@ -56,6 +74,7 @@ export type PluginSessionRegistrationPayload = {
   editorType: "figma" | "figjam" | "dev" | "slides" | "buzz";
   fileName: string;
   pageName: string;
+  runtimeFeatures: PluginRuntimeFeatures;
   capabilities: PluginCapabilityDescriptor[];
   selection: PluginNodeSummary[];
 };
@@ -72,6 +91,7 @@ export type PluginCommandExecutionResult = {
   changedNodeIds: string[];
   createdStyleIds: string[];
   createdVariableIds: string[];
+  exportedImages: PluginImageArtifact[];
   warnings: string[];
   errorCode: string | null;
   message: string;

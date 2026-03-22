@@ -5,10 +5,31 @@ import { fileURLToPath } from "node:url";
 
 import { buildContextPack } from "../shared/context-pack.js";
 import type {
+  PluginBridgeCommandRecord,
+  PluginImageArtifact,
   PluginCommandResultPayload,
+  PluginBridgeSession,
+  PluginNodeSummary,
   PluginSessionRegistrationPayload,
   QueuePluginCommandPayload,
 } from "../shared/plugin-bridge.js";
+import type {
+  ApproveReconstructionPlanPayload,
+  CreateReconstructionJobPayload,
+  ReconstructionBounds,
+  ReconstructionContextPack,
+  ReconstructionFontMatch,
+  ReconstructionJob,
+  ReconstructionLoopStopReason,
+  ReconstructionRegion,
+  ReconstructionStructureReport,
+  ReconstructionTextCandidate,
+  SubmitReconstructionAnalysisPayload,
+  ReviewReconstructionAssetPayload,
+  ReviewReconstructionFontPayload,
+} from "../shared/reconstruction.js";
+import { RECONSTRUCTION_ACTIONABLE_CONFIDENCE } from "../shared/reconstruction.js";
+import type { FigmaCapabilityCommand, FigmaPluginCommandBatch } from "../shared/plugin-contract.js";
 import { runRuntimeAction } from "../shared/runtime-actions.js";
 import type {
   ContextPack,
@@ -21,11 +42,40 @@ import { nowIso, slugify } from "../shared/utils.js";
 import {
   claimNextPluginCommand,
   completePluginCommand,
+  getPluginCommandRecord,
   getPluginBridgeSnapshot,
   heartbeatPluginSession,
   queuePluginCommand,
   registerPluginSession,
 } from "./plugin-bridge-store.js";
+import {
+  approveReconstructionPlan,
+  clearReconstructionAppliedState,
+  createReconstructionJob,
+  completeReconstructionAnalysis,
+  failReconstructionJob,
+  getReconstructionJob,
+  listReconstructionJobs,
+  markReconstructionApplied,
+  markReconstructionLoopStatus,
+  markReconstructionMeasured,
+  markReconstructionRefined,
+  markReconstructionRendered,
+  prepareRasterReconstruction,
+  prepareVectorReconstruction,
+  reviewReconstructionAssetChoice,
+  reviewReconstructionFontChoice,
+} from "./reconstruction-store.js";
+import {
+  buildNormalizedReconstructionAnalysis,
+  buildReconstructionContextPack,
+  runPreviewOnlyReconstructionAnalysis,
+} from "./reconstruction-analysis.js";
+import {
+  buildRefineSuggestions,
+  createRenderedPreview,
+  measurePreviewDiff,
+} from "./reconstruction-evaluation.js";
 import { readProject, resetProject, writeProject } from "./storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +83,8 @@ const __dirname = path.dirname(__filename);
 const rootDirectory = path.resolve(__dirname, "..");
 const distDirectory = path.join(rootDirectory, "dist");
 const port = Number(process.env.PORT ?? 3001);
+const pluginCommandWaitTimeoutMs = 30_000;
+const pluginCommandPollIntervalMs = 300;
 
 type RequestContext = {
   pathname: string;
@@ -245,6 +297,1629 @@ async function handlePluginCommandResult(
   sendJson(response, 200, result);
 }
 
+function findSessionById(sessions: PluginBridgeSession[], sessionId: string) {
+  return sessions.find((session) => session.id === sessionId) || null;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function collectCommandWarnings(command: PluginBridgeCommandRecord) {
+  return uniqueStrings(command.results.flatMap((result) => result.warnings || []));
+}
+
+function collectChangedNodeIds(command: PluginBridgeCommandRecord) {
+  return uniqueStrings(command.results.flatMap((result) => result.changedNodeIds || []));
+}
+
+function collectExportedImages(command: PluginBridgeCommandRecord) {
+  return command.results.flatMap((result) => result.exportedImages || []) as PluginImageArtifact[];
+}
+
+function isOnlineSession(session: PluginBridgeSession | null) {
+  return Boolean(session && session.status === "online");
+}
+
+function supportsExplicitNodeTargeting(session: PluginBridgeSession | null) {
+  return Boolean(session?.runtimeFeatures?.supportsExplicitNodeTargeting);
+}
+
+async function requireOnlineSession(sessionId: string) {
+  const snapshot = await getPluginBridgeSnapshot();
+  const session = findSessionById(snapshot.sessions, sessionId);
+  if (!session) {
+    throw new Error("Plugin session not found");
+  }
+  if (!isOnlineSession(session)) {
+    throw new Error(`Plugin session ${sessionId} is not online.`);
+  }
+  return session;
+}
+
+async function requireLoopCompatibleSession(sessionId: string) {
+  const session = await requireOnlineSession(sessionId);
+  if (!supportsExplicitNodeTargeting(session)) {
+    throw new Error(
+      "当前在线 AutoDesign 插件会话未声明 supportsExplicitNodeTargeting，server 已阻止 auto-refine loop 继续执行。请重新导入并重新运行最新插件。",
+    );
+  }
+  return session;
+}
+
+async function waitForPluginCommand(commandId: string) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= pluginCommandWaitTimeoutMs) {
+    const command = await getPluginCommandRecord(commandId);
+    if (!command) {
+      throw new Error(`Plugin command ${commandId} not found.`);
+    }
+    if (command.status === "succeeded" || command.status === "failed") {
+      return command;
+    }
+    await sleep(pluginCommandPollIntervalMs);
+  }
+  throw new Error(`Timed out waiting for plugin command ${commandId}.`);
+}
+
+async function queueAndWaitForPluginBatch(
+  targetSessionId: string,
+  commands: FigmaCapabilityCommand[],
+) {
+  if (!commands.length) {
+    throw new Error("No reconstruction commands to execute.");
+  }
+
+  await requireOnlineSession(targetSessionId);
+
+  const batch: FigmaPluginCommandBatch = {
+    source: "codex",
+    issuedAt: nowIso(),
+    commands: commands.map((command) => ({
+      ...command,
+      executionMode: "strict",
+    })),
+  };
+
+  const queued = await queuePluginCommand({
+    targetSessionId,
+    source: "codex",
+    payload: batch,
+  });
+
+  return waitForPluginCommand(queued.id);
+}
+
+function isRasterExactJob(job: ReconstructionJob) {
+  return job.input.strategy === "raster-exact";
+}
+
+function isVectorReconstructionJob(job: ReconstructionJob) {
+  return job.input.strategy === "vector-reconstruction";
+}
+
+async function exportSingleNodeImage(
+  targetSessionId: string,
+  nodeId: string,
+  options?: {
+    preferOriginalBytes?: boolean;
+    constraint?: { type: "WIDTH" | "HEIGHT" | "SCALE"; value: number };
+  },
+) {
+  const command = await queueAndWaitForPluginBatch(targetSessionId, [
+    {
+      type: "capability",
+      capabilityId: "assets.export-node-image",
+      nodeIds: [nodeId],
+      payload: {
+        preferOriginalBytes: options?.preferOriginalBytes,
+        ...(options?.constraint ? { constraint: options.constraint } : {}),
+      },
+      executionMode: "strict",
+    },
+  ]);
+
+  assertSuccessfulCommandRecord(command, "Node image export");
+  const artifact = collectExportedImages(command).find((item) => item.nodeId === nodeId) || null;
+  if (!artifact) {
+    throw new Error(`Node image export completed without artifact for node ${nodeId}.`);
+  }
+  return artifact;
+}
+
+async function ensureRasterReference(job: ReconstructionJob) {
+  if (job.referenceRaster) {
+    return job.referenceRaster;
+  }
+
+  const referenceRaster = await exportSingleNodeImage(job.input.targetSessionId, job.referenceNode.id, {
+    preferOriginalBytes: true,
+  });
+  const updated = await prepareRasterReconstruction(job.id, { referenceRaster });
+  return updated?.referenceRaster || referenceRaster;
+}
+
+async function ensureVectorReference(job: ReconstructionJob) {
+  if (job.referenceRaster) {
+    return job.referenceRaster;
+  }
+
+  const referenceRaster = await exportSingleNodeImage(job.input.targetSessionId, job.referenceNode.id, {
+    preferOriginalBytes: true,
+  });
+  const updated = await prepareVectorReconstruction(job.id, { referenceRaster });
+  return updated?.referenceRaster || referenceRaster;
+}
+
+function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructionJob>>) {
+  if (!job?.rebuildPlan) {
+    throw new Error("Reconstruction job is missing rebuildPlan.");
+  }
+
+  const namePrefix = `AD Rebuild/${job.id}`;
+  let surfaceIndex = 0;
+  let textIndex = 0;
+  let primitiveIndex = 0;
+
+  const vectorCapabilityIds = new Set([
+    "nodes.create-rectangle",
+    "nodes.create-ellipse",
+    "nodes.create-line",
+    "nodes.create-svg",
+  ]);
+
+  return job.rebuildPlan.ops.map((command): FigmaCapabilityCommand => {
+    if (command.type !== "capability") {
+      throw new Error("Rebuild plan contains a non-capability command.");
+    }
+    if (
+      command.capabilityId !== "nodes.create-frame" &&
+      command.capabilityId !== "nodes.create-text" &&
+      !vectorCapabilityIds.has(command.capabilityId)
+    ) {
+      throw new Error(`Rebuild plan contains unsupported capability: ${command.capabilityId}.`);
+    }
+
+    if (command.capabilityId === "nodes.create-frame") {
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-frame">["payload"];
+      surfaceIndex += 1;
+      return {
+        type: "capability",
+        capabilityId: "nodes.create-frame",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: command.nodeIds,
+        payload: {
+          ...payload,
+          name:
+            typeof payload.name === "string" && payload.name.trim()
+              ? payload.name.trim()
+              : `${namePrefix}/Surface ${surfaceIndex}`,
+          parentNodeId: payload.parentNodeId || job.targetNode.id,
+        },
+      } satisfies FigmaCapabilityCommand<"nodes.create-frame">;
+    }
+
+    if (command.capabilityId === "nodes.create-text") {
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-text">["payload"];
+      textIndex += 1;
+      return {
+        type: "capability",
+        capabilityId: "nodes.create-text",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: command.nodeIds,
+        payload: {
+          ...payload,
+          name:
+            typeof payload.name === "string" && payload.name.trim()
+              ? payload.name.trim()
+              : `${namePrefix}/Text ${textIndex}`,
+          parentNodeId: payload.parentNodeId || job.targetNode.id,
+        },
+      } satisfies FigmaCapabilityCommand<"nodes.create-text">;
+    }
+
+    primitiveIndex += 1;
+    if (command.capabilityId === "nodes.create-rectangle") {
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-rectangle">["payload"];
+      return {
+        type: "capability",
+        capabilityId: "nodes.create-rectangle",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: command.nodeIds,
+        payload: {
+          ...payload,
+          name:
+            typeof payload.name === "string" && payload.name.trim()
+              ? payload.name.trim()
+              : `${namePrefix}/Primitive ${primitiveIndex}`,
+          parentNodeId: payload.parentNodeId || job.targetNode.id,
+        },
+      } satisfies FigmaCapabilityCommand<"nodes.create-rectangle">;
+    }
+
+    if (command.capabilityId === "nodes.create-ellipse") {
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-ellipse">["payload"];
+      return {
+        type: "capability",
+        capabilityId: "nodes.create-ellipse",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: command.nodeIds,
+        payload: {
+          ...payload,
+          name:
+            typeof payload.name === "string" && payload.name.trim()
+              ? payload.name.trim()
+              : `${namePrefix}/Primitive ${primitiveIndex}`,
+          parentNodeId: payload.parentNodeId || job.targetNode.id,
+        },
+      } satisfies FigmaCapabilityCommand<"nodes.create-ellipse">;
+    }
+
+    if (command.capabilityId === "nodes.create-line") {
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-line">["payload"];
+      return {
+        type: "capability",
+        capabilityId: "nodes.create-line",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: command.nodeIds,
+        payload: {
+          ...payload,
+          name:
+            typeof payload.name === "string" && payload.name.trim()
+              ? payload.name.trim()
+              : `${namePrefix}/Primitive ${primitiveIndex}`,
+          parentNodeId: payload.parentNodeId || job.targetNode.id,
+        },
+      } satisfies FigmaCapabilityCommand<"nodes.create-line">;
+    }
+
+    const payload = command.payload as FigmaCapabilityCommand<"nodes.create-svg">["payload"];
+    return {
+      type: "capability",
+      capabilityId: "nodes.create-svg",
+      executionMode: "strict",
+      dryRun: command.dryRun,
+      nodeIds: command.nodeIds,
+      payload: {
+        ...payload,
+        name:
+          typeof payload.name === "string" && payload.name.trim()
+            ? payload.name.trim()
+            : `${namePrefix}/Primitive ${primitiveIndex}`,
+        parentNodeId: payload.parentNodeId || job.targetNode.id,
+      },
+    } satisfies FigmaCapabilityCommand<"nodes.create-svg">;
+  });
+}
+
+function buildStructureReport(
+  job: ReconstructionJob,
+  targetNode: PluginNodeSummary,
+): ReconstructionStructureReport | null {
+  if (!isVectorReconstructionJob(job)) {
+    return null;
+  }
+
+  const ops = job.rebuildPlan?.ops.filter((op) => op.type === "capability") || [];
+  const textNodeCount = ops.filter((op) => op.capabilityId === "nodes.create-text").length;
+  const vectorNodeCount = ops.filter((op) =>
+    op.capabilityId === "nodes.create-rectangle" ||
+    op.capabilityId === "nodes.create-ellipse" ||
+    op.capabilityId === "nodes.create-line" ||
+    op.capabilityId === "nodes.create-svg"
+  ).length;
+  const imageFillNodeCount = ops.filter((op) => op.capabilityId === "reconstruction.apply-raster-reference").length;
+  const inferredTextCount = job.analysis?.textBlocks.filter((block) => block.inferred).length || 0;
+  const expectedWidth = Number(job.targetNode.width || 0);
+  const expectedHeight = Number(job.targetNode.height || 0);
+  const actualWidth = Number(targetNode.width || 0);
+  const actualHeight = Number(targetNode.height || 0);
+  const targetFramePreserved =
+    expectedWidth > 0 && expectedHeight > 0
+      ? Math.abs(actualWidth - expectedWidth) < 0.5 && Math.abs(actualHeight - expectedHeight) < 0.5
+      : null;
+
+  const issues: string[] = [];
+  if (targetFramePreserved === false) {
+    issues.push(
+      `target frame 尺寸发生变化: expected ${expectedWidth}x${expectedHeight}, actual ${actualWidth}x${actualHeight}`,
+    );
+  }
+  if (imageFillNodeCount > 0) {
+    issues.push("vector-reconstruction 结果中检测到 raster/image-fill 写回。");
+  }
+  if (textNodeCount + vectorNodeCount === 0) {
+    issues.push("vector-reconstruction rebuild plan 没有生成任何可编辑节点。");
+  }
+
+  return {
+    targetFramePreserved,
+    imageFillNodeCount,
+    textNodeCount,
+    vectorNodeCount,
+    inferredTextCount,
+    passed: issues.length === 0,
+    issues,
+  };
+}
+
+type AppliedRebuildNode = {
+  nodeId: string;
+  kind: "surface" | "text";
+  normalizedBounds: ReconstructionBounds;
+  absoluteBounds: ReconstructionBounds;
+  fillHex: string | null;
+  textCandidate: ReconstructionTextCandidate | null;
+  region: ReconstructionRegion | null;
+  fontMatch: ReconstructionFontMatch | null;
+};
+
+function projectBounds(
+  bounds: ReconstructionBounds,
+  targetWidth: number,
+  targetHeight: number,
+): ReconstructionBounds {
+  return {
+    x: Math.round(bounds.x * targetWidth),
+    y: Math.round(bounds.y * targetHeight),
+    width: Math.max(8, Math.round(bounds.width * targetWidth)),
+    height: Math.max(8, Math.round(bounds.height * targetHeight)),
+  };
+}
+
+function boundsArea(bounds: ReconstructionBounds) {
+  return Math.max(0, bounds.width) * Math.max(0, bounds.height);
+}
+
+function overlapScore(left: ReconstructionBounds, right: ReconstructionBounds) {
+  const x1 = Math.max(left.x, right.x);
+  const y1 = Math.max(left.y, right.y);
+  const x2 = Math.min(left.x + left.width, right.x + right.width);
+  const y2 = Math.min(left.y + left.height, right.y + right.height);
+  const width = Math.max(0, x2 - x1);
+  const height = Math.max(0, y2 - y1);
+  const intersection = width * height;
+  if (!intersection) {
+    return 0;
+  }
+  const union = boundsArea(left) + boundsArea(right) - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function blendBounds(
+  left: ReconstructionBounds,
+  right: ReconstructionBounds,
+  ratio: number,
+): ReconstructionBounds {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const inverse = 1 - clamped;
+  return {
+    x: Math.round(left.x * inverse + right.x * clamped),
+    y: Math.round(left.y * inverse + right.y * clamped),
+    width: Math.max(8, Math.round(left.width * inverse + right.width * clamped)),
+    height: Math.max(8, Math.round(left.height * inverse + right.height * clamped)),
+  };
+}
+
+function uniqueHexPalette(job: ReconstructionJob) {
+  return uniqueStrings([
+    job.analysis?.styleHints.primaryColorHex || "",
+    job.analysis?.styleHints.accentColorHex || "",
+    ...(job.analysis?.dominantColors || []),
+  ]);
+}
+
+function buildAppliedRebuildNodes(job: ReconstructionJob): AppliedRebuildNode[] {
+  if (!job.analysis || !job.rebuildPlan) {
+    return [];
+  }
+
+  const targetWidth = job.targetNode.width || job.analysis.width;
+  const targetHeight = job.targetNode.height || job.analysis.height;
+  const appliedNodes: AppliedRebuildNode[] = [];
+  let surfaceIndex = 0;
+  let textIndex = 0;
+
+  job.rebuildPlan.ops.forEach((command, index) => {
+    const nodeId = job.appliedNodeIds[index];
+    if (!nodeId || command.type !== "capability") {
+      return;
+    }
+
+    if (command.capabilityId === "nodes.create-frame") {
+      const region = job.analysis?.layoutRegions[surfaceIndex] || null;
+      surfaceIndex += 1;
+      if (!region) {
+        return;
+      }
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-frame">["payload"];
+      appliedNodes.push({
+        nodeId,
+        kind: "surface",
+        normalizedBounds: region.bounds,
+        absoluteBounds: {
+          x: Number.isFinite(payload.x) ? Number(payload.x) : projectBounds(region.bounds, targetWidth, targetHeight).x,
+          y: Number.isFinite(payload.y) ? Number(payload.y) : projectBounds(region.bounds, targetWidth, targetHeight).y,
+          width: Number.isFinite(payload.width)
+            ? Number(payload.width)
+            : projectBounds(region.bounds, targetWidth, targetHeight).width,
+          height: Number.isFinite(payload.height)
+            ? Number(payload.height)
+            : projectBounds(region.bounds, targetWidth, targetHeight).height,
+        },
+        fillHex: payload.fillHex || region.fillHex || job.analysis?.styleHints.accentColorHex || null,
+        textCandidate: null,
+        region,
+        fontMatch: null,
+      });
+      return;
+    }
+
+    if (command.capabilityId === "nodes.create-text") {
+      const textCandidate = job.analysis?.textCandidates[textIndex] || null;
+      const fontMatch =
+        textCandidate && job.fontMatches.find((item) => item.textCandidateId === textCandidate.id)
+          ? job.fontMatches.find((item) => item.textCandidateId === textCandidate.id) || null
+          : null;
+      textIndex += 1;
+      if (!textCandidate) {
+        return;
+      }
+      const payload = command.payload as FigmaCapabilityCommand<"nodes.create-text">["payload"];
+      const projected = projectBounds(textCandidate.bounds, targetWidth, targetHeight);
+      appliedNodes.push({
+        nodeId,
+        kind: "text",
+        normalizedBounds: textCandidate.bounds,
+        absoluteBounds: {
+          x: Number.isFinite(payload.x) ? Number(payload.x) : projected.x,
+          y: Number.isFinite(payload.y) ? Number(payload.y) : projected.y,
+          width: projected.width,
+          height: projected.height,
+        },
+        fillHex: payload.colorHex || null,
+        textCandidate,
+        region: null,
+        fontMatch,
+      });
+    }
+  });
+
+  return appliedNodes;
+}
+
+function findBestAppliedNode(
+  nodes: AppliedRebuildNode[],
+  kind: AppliedRebuildNode["kind"],
+  normalizedBounds: ReconstructionBounds | null,
+) {
+  const candidates = nodes.filter((node) => node.kind === kind);
+  if (!candidates.length) {
+    return null;
+  }
+  if (!normalizedBounds) {
+    return candidates[0];
+  }
+  return [...candidates].sort(
+    (left, right) =>
+      overlapScore(right.normalizedBounds, normalizedBounds) -
+      overlapScore(left.normalizedBounds, normalizedBounds),
+  )[0];
+}
+
+function isActionableSuggestion(job: ReconstructionJob, suggestion: ReconstructionJob["refineSuggestions"][number]) {
+  return (
+    suggestion.kind !== "manual-review" &&
+    suggestion.confidence >= RECONSTRUCTION_ACTIONABLE_CONFIDENCE &&
+    job.applyStatus === "applied"
+  );
+}
+
+function resolveLoopStopReason(job: ReconstructionJob): ReconstructionLoopStopReason | null {
+  if (job.stopReason) {
+    return job.stopReason;
+  }
+  if (job.status === "completed") {
+    if ((job.diffMetrics?.globalSimilarity || job.diffScore || 0) >= 0.9) {
+      return "target_reached";
+    }
+    if (job.iterationCount >= job.input.maxIterations) {
+      return "max_iterations";
+    }
+    if (job.stagnationCount >= 2) {
+      return "stalled";
+    }
+    return "no_actionable_suggestions";
+  }
+  return null;
+}
+
+function buildAutoRefineCommands(job: ReconstructionJob) {
+  if (!job.analysis || !job.rebuildPlan || !job.appliedNodeIds.length) {
+    return {
+      commands: [] as FigmaCapabilityCommand[],
+      warnings: ["Reconstruction job 缺少分析结果或已应用节点，无法生成自动 refine 命令。"],
+    };
+  }
+
+  const appliedNodes = buildAppliedRebuildNodes(job);
+  const targetWidth = job.targetNode.width || job.analysis.width;
+  const targetHeight = job.targetNode.height || job.analysis.height;
+  const palette = uniqueHexPalette(job);
+  const issued = new Set<string>();
+  const commands: FigmaCapabilityCommand[] = [];
+  const warnings: string[] = [];
+
+  const pushCommand = (command: FigmaCapabilityCommand) => {
+    const key = JSON.stringify({
+      capabilityId: command.capabilityId,
+      nodeIds: command.nodeIds || [],
+      payload: command.payload,
+    });
+    if (issued.has(key)) {
+      return;
+    }
+    issued.add(key);
+    commands.push(command);
+  };
+
+  for (const suggestion of job.refineSuggestions) {
+    if (!isActionableSuggestion(job, suggestion)) {
+      continue;
+    }
+
+    if (suggestion.kind === "nudge-fill") {
+      const node = findBestAppliedNode(appliedNodes, "surface", suggestion.bounds);
+      if (!node) {
+        warnings.push("没有找到可执行 fill refine 的 surface 节点。");
+        continue;
+      }
+      const preferredHex =
+        node.region?.fillHex ||
+        (node.region?.kind === "emphasis"
+          ? job.analysis.styleHints.accentColorHex
+          : job.analysis.styleHints.primaryColorHex) ||
+        palette[0] ||
+        node.fillHex;
+      const fillHex =
+        job.stagnationCount > 0
+          ? palette.find((hex) => hex !== preferredHex && hex !== node.fillHex) || preferredHex
+          : preferredHex;
+      if (!fillHex) {
+        warnings.push(`节点 ${node.nodeId} 缺少可用 fill 颜色。`);
+        continue;
+      }
+      pushCommand({
+        type: "capability",
+        capabilityId: "fills.set-fill",
+        nodeIds: [node.nodeId],
+        payload: { hex: fillHex },
+      });
+      continue;
+    }
+
+    if (suggestion.kind === "nudge-layout") {
+      const node = findBestAppliedNode(appliedNodes, "surface", suggestion.bounds);
+      if (!node) {
+        warnings.push("没有找到可执行 layout refine 的 surface 节点。");
+        continue;
+      }
+
+      const hotspotBounds = suggestion.bounds
+        ? projectBounds(suggestion.bounds, targetWidth, targetHeight)
+        : node.absoluteBounds;
+      const targetBounds = blendBounds(node.absoluteBounds, hotspotBounds, 0.35);
+
+      pushCommand({
+        type: "capability",
+        capabilityId: "geometry.set-position",
+        nodeIds: [node.nodeId],
+        payload: { x: targetBounds.x, y: targetBounds.y },
+      });
+      pushCommand({
+        type: "capability",
+        capabilityId: "geometry.set-size",
+        nodeIds: [node.nodeId],
+        payload: { width: targetBounds.width, height: targetBounds.height },
+      });
+      continue;
+    }
+
+    if (suggestion.kind === "nudge-text") {
+      const node = findBestAppliedNode(appliedNodes, "text", suggestion.bounds);
+      if (!node || !node.textCandidate) {
+        warnings.push("没有找到可执行 text refine 的文本节点。");
+        continue;
+      }
+
+      const hotspotBounds = suggestion.bounds
+        ? projectBounds(suggestion.bounds, targetWidth, targetHeight)
+        : node.absoluteBounds;
+      const projectedBounds = projectBounds(node.textCandidate.bounds, targetWidth, targetHeight);
+      const targetBounds = blendBounds(projectedBounds, hotspotBounds, 0.25);
+      const fontCandidates = node.fontMatch?.candidates || [];
+      const fontFamily =
+        job.stagnationCount > 0 ? fontCandidates[1] || node.fontMatch?.recommended : node.fontMatch?.recommended;
+      const fontSize = Math.max(12, Math.round(projectedBounds.height * 0.82));
+      const textColorHex =
+        job.analysis.styleHints.theme === "dark"
+          ? "#F5F7FF"
+          : "#111111";
+
+      pushCommand({
+        type: "capability",
+        capabilityId: "geometry.set-position",
+        nodeIds: [node.nodeId],
+        payload: { x: targetBounds.x, y: targetBounds.y },
+      });
+      pushCommand({
+        type: "capability",
+        capabilityId: "text.set-font-size",
+        nodeIds: [node.nodeId],
+        payload: { value: fontSize },
+      });
+      if (fontFamily) {
+        pushCommand({
+          type: "capability",
+          capabilityId: "text.set-font-family",
+          nodeIds: [node.nodeId],
+          payload: { family: fontFamily },
+        });
+      }
+      pushCommand({
+        type: "capability",
+        capabilityId: "text.set-text-color",
+        nodeIds: [node.nodeId],
+        payload: { hex: textColorHex },
+      });
+    }
+  }
+
+  return {
+    commands: commands.slice(0, 8),
+    warnings,
+  };
+}
+
+function assertSuccessfulCommandRecord(
+  command: PluginBridgeCommandRecord,
+  contextLabel: string,
+  options?: { allowMissingWarnings?: boolean },
+) {
+  if (command.status !== "succeeded") {
+    throw new Error(command.resultMessage || `${contextLabel} failed.`);
+  }
+
+  const failedResult = command.results.find((result) => !result.ok);
+  if (failedResult) {
+    throw new Error(failedResult.message || `${contextLabel} failed.`);
+  }
+
+  const warnings = collectCommandWarnings(command);
+  if (!warnings.length) {
+    return warnings;
+  }
+
+  if (options?.allowMissingWarnings) {
+    const unexpected = warnings.filter((warning) => !warning.includes("未找到"));
+    if (!unexpected.length) {
+      return warnings;
+    }
+    throw new Error(`${contextLabel} returned warnings: ${unexpected.join(" | ")}`);
+  }
+
+  throw new Error(`${contextLabel} returned warnings: ${warnings.join(" | ")}`);
+}
+
+async function clearReconstructionNodes(job: NonNullable<Awaited<ReturnType<typeof getReconstructionJob>>>) {
+  if (!job.appliedNodeIds.length) {
+    return {
+      warnings: [] as string[],
+      deletedNodeIds: [] as string[],
+    };
+  }
+
+  const command = await queueAndWaitForPluginBatch(job.input.targetSessionId, [
+    {
+      type: "capability",
+      capabilityId: "nodes.delete",
+      payload: {},
+      nodeIds: job.appliedNodeIds,
+      executionMode: "strict",
+    },
+  ]);
+
+  const warnings = assertSuccessfulCommandRecord(command, "Reconstruction clear", {
+    allowMissingWarnings: true,
+  });
+
+  return {
+    warnings,
+    deletedNodeIds: collectChangedNodeIds(command),
+  };
+}
+
+function findSelectionNode(session: PluginBridgeSession, nodeId: string) {
+  return (Array.isArray(session.selection) ? session.selection : []).find((node) => node.id === nodeId) || null;
+}
+
+async function waitForSessionSelectionNode(
+  sessionId: string,
+  nodeId: string,
+  options?: { requirePreview?: boolean },
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= pluginCommandWaitTimeoutMs) {
+    const snapshot = await getPluginBridgeSnapshot();
+    const session = findSessionById(snapshot.sessions, sessionId);
+    if (session && session.status === "online") {
+      const node = findSelectionNode(session, nodeId);
+      if (node && (!options?.requirePreview || Boolean(node.previewDataUrl))) {
+        return {
+          session,
+          node,
+        };
+      }
+    }
+
+    await sleep(pluginCommandPollIntervalMs);
+  }
+
+  throw new Error(`Timed out waiting for selection preview of node ${nodeId}.`);
+}
+
+async function refreshSessionSelection(targetSessionId: string) {
+  return queueAndWaitForPluginBatch(targetSessionId, [
+    {
+      type: "capability",
+      capabilityId: "selection.refresh",
+      payload: {},
+      executionMode: "strict",
+    },
+  ]);
+}
+
+async function renderReconstructionPreview(job: ReconstructionJob) {
+  const artifact = await exportSingleNodeImage(job.input.targetSessionId, job.targetNode.id, {
+    preferOriginalBytes: false,
+  });
+  const targetNode: PluginNodeSummary = {
+    ...job.targetNode,
+    width: artifact.width,
+    height: artifact.height,
+    previewDataUrl: artifact.dataUrl,
+  };
+
+  return {
+    targetNode,
+    renderedPreview: createRenderedPreview(
+      artifact.dataUrl,
+      artifact.width,
+      artifact.height,
+    ),
+  };
+}
+
+async function runReconstructionIteration(jobId: string) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    throw new Error("Reconstruction job not found");
+  }
+  if (isRasterExactJob(job)) {
+    throw new Error("raster-exact job 不支持 iterate/refine loop。请直接使用 render + measure 验证结果。");
+  }
+  if (!job.analysis) {
+    throw new Error("Reconstruction job has no analysis yet");
+  }
+  if (job.applyStatus !== "applied") {
+    throw new Error("Reconstruction job must be applied before running diff iteration");
+  }
+
+  const rendered = await renderReconstructionPreview(job);
+  const renderedJob = await markReconstructionRendered(jobId, rendered);
+  if (!renderedJob) {
+    throw new Error("Reconstruction job not found");
+  }
+
+  const diffMetrics = await measurePreviewDiff(
+    renderedJob.analysis?.previewDataUrl || job.analysis.previewDataUrl,
+    rendered.renderedPreview.previewDataUrl,
+  );
+
+  const measuredJob = await markReconstructionMeasured(jobId, { diffMetrics });
+  if (!measuredJob) {
+    throw new Error("Reconstruction job not found");
+  }
+
+  const refineSuggestions = buildRefineSuggestions(measuredJob, diffMetrics);
+  const refinedJob = await markReconstructionRefined(jobId, { refineSuggestions });
+  if (!refinedJob) {
+    throw new Error("Reconstruction job not found");
+  }
+
+  return refinedJob;
+}
+
+async function runReconstructionLoop(jobId: string) {
+  let job = await getReconstructionJob(jobId);
+  if (!job) {
+    throw new Error("Reconstruction job not found");
+  }
+  if (isRasterExactJob(job)) {
+    throw new Error("raster-exact job 不支持自动 refine loop。");
+  }
+  if (!job.analysis) {
+    throw new Error("Reconstruction job has no analysis yet");
+  }
+  if (job.applyStatus !== "applied") {
+    throw new Error("Reconstruction job must be applied before running auto refine loop");
+  }
+  await requireLoopCompatibleSession(job.input.targetSessionId);
+
+  const running = await markReconstructionLoopStatus(jobId, {
+    loopStatus: "running",
+    stopReason: null,
+  });
+  if (!running) {
+    throw new Error("Reconstruction job not found");
+  }
+  job = running;
+
+  const safetyLimit = Math.max(1, job.input.maxIterations + 1);
+  for (let cycle = 0; cycle < safetyLimit; cycle += 1) {
+    if (!job.diffMetrics || !job.refineSuggestions.length) {
+      job = await runReconstructionIteration(jobId);
+    }
+
+    const stopReason = resolveLoopStopReason(job);
+    if (stopReason || job.status === "completed") {
+      const stopped = await markReconstructionLoopStatus(jobId, {
+        loopStatus: "stopped",
+        stopReason: stopReason || job.stopReason || "no_actionable_suggestions",
+      });
+      return stopped || job;
+    }
+
+    const refinement = buildAutoRefineCommands(job);
+    if (!refinement.commands.length) {
+      const stopped = await markReconstructionLoopStatus(jobId, {
+        loopStatus: "stopped",
+        stopReason: "no_actionable_suggestions",
+        warnings: refinement.warnings.length
+          ? refinement.warnings
+          : ["当前没有可执行的自动 refine 命令。"],
+      });
+      return stopped || job;
+    }
+
+    const command = await queueAndWaitForPluginBatch(job.input.targetSessionId, refinement.commands);
+    const commandWarnings = assertSuccessfulCommandRecord(command, "Reconstruction loop refine");
+    job = (await runReconstructionIteration(jobId)) || job;
+
+    if (commandWarnings.length || refinement.warnings.length) {
+      const refreshed = await markReconstructionLoopStatus(jobId, {
+        loopStatus: job.status === "completed" ? "stopped" : "running",
+        stopReason: job.status === "completed" ? job.stopReason : null,
+        warnings: [...commandWarnings, ...refinement.warnings],
+      });
+      if (refreshed) {
+        job = refreshed;
+      }
+    }
+  }
+
+  const stopped = await markReconstructionLoopStatus(jobId, {
+    loopStatus: "stopped",
+    stopReason: "max_iterations",
+    warnings: ["自动 refine 触发了 server safety limit，已强制停止。"],
+  });
+  return stopped || job;
+}
+
+function resolveReconstructionNodes(
+  session: PluginBridgeSession,
+  payload: CreateReconstructionJobPayload,
+) {
+  const selection = Array.isArray(session.selection) ? session.selection : [];
+  const targetNode = payload.targetNodeId
+    ? selection.find((node) => node.id === payload.targetNodeId) || null
+    : null;
+  const referenceNode = payload.referenceNodeId
+    ? selection.find((node) => node.id === payload.referenceNodeId) || null
+    : null;
+
+  const frameCandidates = selection.filter((node) => node.type === "FRAME");
+  const imageCandidates = selection.filter((node) => node.fills.includes("image"));
+
+  const resolvedTarget = targetNode || (frameCandidates.length === 1 ? frameCandidates[0] : null);
+  const resolvedReference =
+    referenceNode || (imageCandidates.length === 1 ? imageCandidates[0] : null);
+
+  if (!resolvedTarget) {
+    throw new Error("没有找到唯一可用的目标 Frame。请显式提供 targetNodeId，或确保 selection 中只有一个 Frame。");
+  }
+
+  if (!resolvedReference) {
+    throw new Error(
+      "没有找到唯一可用的参考图片节点。请显式提供 referenceNodeId，或确保 selection 中只有一个图片节点。",
+    );
+  }
+
+  if (resolvedTarget.id === resolvedReference.id) {
+    throw new Error("目标节点和参考节点不能是同一个节点。");
+  }
+
+  if (resolvedTarget.type !== "FRAME") {
+    throw new Error(`目标节点必须是 FRAME，当前为 ${resolvedTarget.type}。`);
+  }
+
+  if (
+    !resolvedReference.fills.includes("image") &&
+    !(typeof resolvedReference.previewDataUrl === "string" && resolvedReference.previewDataUrl)
+  ) {
+    throw new Error("参考节点必须是可预览的图片节点。");
+  }
+
+  return {
+    targetNode: resolvedTarget,
+    referenceNode: resolvedReference,
+  };
+}
+
+async function handleReconstructionJobCreate(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
+  const payload = await readBody<CreateReconstructionJobPayload>(request);
+  if (!payload.targetSessionId) {
+    sendJson(response, 400, { ok: false, error: "targetSessionId is required" });
+    return;
+  }
+
+  const snapshot = await getPluginBridgeSnapshot();
+  const session = findSessionById(snapshot.sessions, payload.targetSessionId);
+  if (!session) {
+    sendJson(response, 404, { ok: false, error: "Plugin session not found" });
+    return;
+  }
+
+  try {
+    const { targetNode, referenceNode } = resolveReconstructionNodes(session, payload);
+    const warnings: string[] = [];
+
+    if (payload.allowOutpainting) {
+      warnings.push("allowOutpainting 已记录，但当前 tranche 仅建立任务，不会实际生成补图。");
+    }
+
+    const job = await createReconstructionJob(payload, targetNode, referenceNode, warnings);
+    sendJson(response, 200, job);
+  } catch (error) {
+    sendJson(response, 400, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Invalid reconstruction input",
+    });
+  }
+}
+
+async function handleReconstructionJobList(response: import("node:http").ServerResponse) {
+  const snapshot = await listReconstructionJobs();
+  sendJson(response, 200, snapshot);
+}
+
+async function handleReconstructionJobGet(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  sendJson(response, 200, job);
+}
+
+async function handleReconstructionJobAnalyze(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (isRasterExactJob(job)) {
+      const referenceRaster = await ensureRasterReference(job);
+      const updated = await prepareRasterReconstruction(jobId, { referenceRaster });
+      if (!updated) {
+        sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+        return;
+      }
+      sendJson(response, 200, updated);
+      return;
+    }
+    if (isVectorReconstructionJob(job)) {
+      const referenceRaster = await ensureVectorReference(job);
+      const updated = await prepareVectorReconstruction(jobId, { referenceRaster });
+      if (!updated) {
+        sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+        return;
+      }
+      sendJson(response, 200, updated);
+      return;
+    }
+
+    const result = await runPreviewOnlyReconstructionAnalysis(job);
+    const updated = await completeReconstructionAnalysis(jobId, result);
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction analysis failed";
+    const failed = await failReconstructionJob(jobId, job.currentStageId, detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobContextPack(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    const contextPack = buildReconstructionContextPack(job);
+    sendJson(response, 200, contextPack satisfies ReconstructionContextPack);
+  } catch (error) {
+    sendJson(response, 400, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to build reconstruction context pack",
+    });
+  }
+}
+
+async function handleReconstructionJobSubmitAnalysis(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  const payload = await readBody<SubmitReconstructionAnalysisPayload>(request);
+  if (payload.analysis === undefined) {
+    sendJson(response, 400, { ok: false, error: "analysis is required" });
+    return;
+  }
+
+  try {
+    const normalized = buildNormalizedReconstructionAnalysis(job, {
+      analysisVersion: payload.analysisVersion,
+      analysisProvider: payload.analysisProvider || "codex-assisted",
+      analysis: payload.analysis,
+      fontMatches: payload.fontMatches,
+      reviewFlags: payload.reviewFlags,
+      warnings: payload.warnings,
+    });
+    const updated = await completeReconstructionAnalysis(jobId, normalized);
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to submit reconstruction analysis";
+    const failed = await failReconstructionJob(jobId, job.currentStageId, detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 400, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobPreviewPlan(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+  if (!job.rebuildPlan) {
+    sendJson(response, 409, { ok: false, error: "Reconstruction job has no rebuild plan yet" });
+    return;
+  }
+  sendJson(response, 200, job);
+}
+
+async function handleReconstructionJobReviewFont(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const payload = await readBody<ReviewReconstructionFontPayload>(request);
+  if (!payload.textCandidateId || !payload.fontFamily) {
+    sendJson(response, 400, { ok: false, error: "textCandidateId and fontFamily are required" });
+    return;
+  }
+
+  try {
+    const updated = await reviewReconstructionFontChoice(jobId, payload);
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 200, updated);
+  } catch (error) {
+    sendJson(response, 400, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Reconstruction font review failed",
+    });
+  }
+}
+
+async function handleReconstructionJobReviewAsset(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const payload = await readBody<ReviewReconstructionAssetPayload>(request);
+  if (!payload.assetId || !payload.decision) {
+    sendJson(response, 400, { ok: false, error: "assetId and decision are required" });
+    return;
+  }
+
+  try {
+    const updated = await reviewReconstructionAssetChoice(jobId, payload);
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 200, updated);
+  } catch (error) {
+    sendJson(response, 400, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Reconstruction asset review failed",
+    });
+  }
+}
+
+async function handleReconstructionJobApprovePlan(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const payload = await readBody<ApproveReconstructionPlanPayload>(request);
+  if (typeof payload.approved !== "boolean") {
+    sendJson(response, 400, { ok: false, error: "approved is required" });
+    return;
+  }
+
+  const updated = await approveReconstructionPlan(jobId, payload);
+  if (!updated) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+  sendJson(response, 200, updated);
+}
+
+async function handleReconstructionJobApply(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  if (!isRasterExactJob(job) && !job.rebuildPlan) {
+    sendJson(response, 409, { ok: false, error: "Reconstruction job has no rebuild plan yet" });
+    return;
+  }
+  if (!isRasterExactJob(job) && job.approvalState !== "approved") {
+    sendJson(response, 409, {
+      ok: false,
+      error: `Reconstruction job must be approved before apply. current approvalState=${job.approvalState}`,
+      job,
+    });
+    return;
+  }
+
+  try {
+    let accumulatedWarnings: string[] = [];
+    let latestJob = job;
+
+    if (isRasterExactJob(job) && !job.referenceRaster) {
+      const referenceRaster = await ensureRasterReference(job);
+      const prepared = await prepareRasterReconstruction(job.id, {
+        referenceRaster,
+      });
+      if (prepared) {
+        latestJob = prepared;
+      }
+    }
+    if (isVectorReconstructionJob(job) && !job.referenceRaster) {
+      const referenceRaster = await ensureVectorReference(job);
+      const prepared = await prepareVectorReconstruction(job.id, {
+        referenceRaster,
+      });
+      if (prepared) {
+        latestJob = prepared;
+      }
+    }
+
+    if (latestJob.appliedNodeIds.length) {
+      const cleared = await clearReconstructionNodes(latestJob);
+      accumulatedWarnings = uniqueStrings([...accumulatedWarnings, ...cleared.warnings]);
+      const reset = await clearReconstructionAppliedState(job.id, {
+        warnings: cleared.warnings,
+        message: "等待重新写入 Figma。",
+      });
+      if (!reset) {
+        sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+        return;
+      }
+    }
+
+    latestJob = (await getReconstructionJob(jobId)) || latestJob;
+    if (!latestJob) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    const command = isRasterExactJob(latestJob)
+      ? await queueAndWaitForPluginBatch(latestJob.input.targetSessionId, [
+          {
+            type: "capability",
+            capabilityId: "reconstruction.apply-raster-reference",
+            nodeIds: [latestJob.targetNode.id],
+            payload: {
+              referenceNodeId: latestJob.referenceNode.id,
+              resultName: `AD Rebuild/${latestJob.id}/Raster`,
+              replaceTargetContents: true,
+              resizeTargetToReference: true,
+            },
+            executionMode: "strict",
+          },
+        ])
+      : await queueAndWaitForPluginBatch(
+          latestJob.input.targetSessionId,
+          normalizeRebuildCommands(latestJob),
+        );
+
+    accumulatedWarnings = uniqueStrings([
+      ...accumulatedWarnings,
+      ...assertSuccessfulCommandRecord(command, "Reconstruction apply"),
+    ]);
+
+    const appliedNodeIds = collectChangedNodeIds(command);
+    if (!appliedNodeIds.length) {
+      throw new Error("Reconstruction apply completed without changedNodeIds.");
+    }
+
+    const updated = await markReconstructionApplied(jobId, {
+      appliedNodeIds,
+      warnings: accumulatedWarnings,
+    });
+
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction apply failed";
+    const failed = await failReconstructionJob(jobId, "apply-rebuild", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobClear(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    let warnings: string[] = [];
+
+    if (job.appliedNodeIds.length) {
+      const cleared = await clearReconstructionNodes(job);
+      warnings = uniqueStrings(cleared.warnings);
+    }
+
+    const updated = await clearReconstructionAppliedState(jobId, {
+      warnings,
+      message: "等待写入 Figma。",
+    });
+
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction clear failed";
+    const failed = await failReconstructionJob(jobId, "apply-rebuild", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobRender(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (job.applyStatus !== "applied") {
+      throw new Error("Reconstruction job must be applied before rendering preview.");
+    }
+
+    const rendered = await renderReconstructionPreview(job);
+    const updated = await markReconstructionRendered(jobId, {
+      ...rendered,
+      structureReport: buildStructureReport(job, rendered.targetNode),
+    });
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction render failed";
+    const failed = await failReconstructionJob(jobId, "render-preview", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobMeasure(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (!isRasterExactJob(job) && !job.analysis) {
+      throw new Error("Reconstruction job has no analysis yet.");
+    }
+    if (!job.renderedPreview?.previewDataUrl) {
+      throw new Error("Reconstruction job has no rendered preview yet.");
+    }
+
+    let referencePreviewDataUrl = job.referenceRaster?.dataUrl || null;
+    if (!referencePreviewDataUrl && isRasterExactJob(job)) {
+      referencePreviewDataUrl = (await ensureRasterReference(job)).dataUrl;
+    }
+    if (!referencePreviewDataUrl && isVectorReconstructionJob(job)) {
+      referencePreviewDataUrl = (await ensureVectorReference(job)).dataUrl;
+    }
+    if (!referencePreviewDataUrl) {
+      referencePreviewDataUrl = job.analysis?.previewDataUrl || null;
+    }
+    if (!referencePreviewDataUrl) {
+      throw new Error("Reconstruction job has no reference preview available for diff measurement.");
+    }
+    const diffMetrics = await measurePreviewDiff(
+      referencePreviewDataUrl,
+      job.renderedPreview.previewDataUrl,
+    );
+    const updated = await markReconstructionMeasured(jobId, { diffMetrics });
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction diff measurement failed";
+    const failed = await failReconstructionJob(jobId, "measure-diff", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobRefine(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (isRasterExactJob(job)) {
+      throw new Error("raster-exact job 不支持 refine。请直接使用 render + measure 进行验收。");
+    }
+    if (isVectorReconstructionJob(job)) {
+      throw new Error("vector-reconstruction 目前不支持自动 refine。请重新提交 analysis 后再 apply/render/measure。");
+    }
+    if (!job.diffMetrics) {
+      throw new Error("Reconstruction job has no diff metrics yet.");
+    }
+
+    const refineSuggestions = buildRefineSuggestions(job, job.diffMetrics);
+    const updated = await markReconstructionRefined(jobId, { refineSuggestions });
+    if (!updated) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction refine failed";
+    const failed = await failReconstructionJob(jobId, "refine", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobIterate(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (isRasterExactJob(job)) {
+      throw new Error("raster-exact job 不支持 iterate。请直接使用 render + measure。");
+    }
+    if (isVectorReconstructionJob(job)) {
+      throw new Error("vector-reconstruction 目前不支持 iterate。请修改 analysis/rebuild plan 后重新 apply。");
+    }
+    const updated = await runReconstructionIteration(jobId);
+    sendJson(response, 200, updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reconstruction iteration failed";
+    const failed = await failReconstructionJob(
+      jobId,
+      job.currentStageId === "measure-diff" ? "measure-diff" : "render-preview",
+      detail,
+    );
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
+async function handleReconstructionJobLoop(
+  response: import("node:http").ServerResponse,
+  jobId: string,
+) {
+  const job = await getReconstructionJob(jobId);
+  if (!job) {
+    sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+    return;
+  }
+
+  try {
+    if (isRasterExactJob(job)) {
+      throw new Error("raster-exact job 不支持自动 refine loop。");
+    }
+    if (isVectorReconstructionJob(job)) {
+      throw new Error("vector-reconstruction 目前不支持自动 refine loop。");
+    }
+    const updated = await runReconstructionLoop(jobId);
+    sendJson(response, 200, updated);
+  } catch (error) {
+    let detail = error instanceof Error ? error.message : "Reconstruction loop failed";
+    if (detail.includes("指定的 nodeIds 在当前 selection 中未找到匹配节点")) {
+      detail += " 当前运行中的 AutoDesign 插件会话很可能还是旧构建，请重新运行插件后再试。";
+    }
+    const failed = await failReconstructionJob(jobId, "refine", detail);
+    if (!failed) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
+    }
+    sendJson(response, 500, {
+      ok: false,
+      error: detail,
+      job: failed,
+    });
+  }
+}
+
 async function serveStaticAsset(
   response: import("node:http").ServerResponse,
   pathname: string,
@@ -375,6 +2050,16 @@ async function routeRequest(
     return;
   }
 
+  if (context.pathname === "/api/reconstruction/jobs" && context.method === "GET") {
+    await handleReconstructionJobList(response);
+    return;
+  }
+
+  if (context.pathname === "/api/reconstruction/jobs" && context.method === "POST") {
+    await handleReconstructionJobCreate(request, response);
+    return;
+  }
+
   if (
     pathSegments.length === 6 &&
     pathSegments[0] === "api" &&
@@ -397,6 +2082,188 @@ async function routeRequest(
     context.method === "POST"
   ) {
     await handlePluginCommandResult(request, response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 4 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    context.method === "GET"
+  ) {
+    await handleReconstructionJobGet(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "context-pack" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobContextPack(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "submit-analysis" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobSubmitAnalysis(request, response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "preview-plan" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobPreviewPlan(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 6 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "review" &&
+    pathSegments[5] === "font" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobReviewFont(request, response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 6 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "review" &&
+    pathSegments[5] === "asset" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobReviewAsset(request, response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 6 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "review" &&
+    pathSegments[5] === "approve-plan" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobApprovePlan(request, response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "analyze" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobAnalyze(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "apply" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobApply(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "clear" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobClear(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "render" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobRender(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "measure" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobMeasure(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "refine" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobRefine(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "iterate" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobIterate(response, pathSegments[3]);
+    return;
+  }
+
+  if (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "reconstruction" &&
+    pathSegments[2] === "jobs" &&
+    pathSegments[4] === "loop" &&
+    context.method === "POST"
+  ) {
+    await handleReconstructionJobLoop(response, pathSegments[3]);
     return;
   }
 
