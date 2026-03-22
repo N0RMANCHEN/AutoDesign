@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Codex to Figma</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --frame-width: 252px;
+        --frame-height: 116px;
+        --bg: var(--figma-color-bg, #ffffff);
+        --surface: var(--figma-color-bg, #ffffff);
+        --surface-container: var(--figma-color-bg, #ffffff);
+        --selection-fill: var(--figma-color-bg-secondary, #f5f6f8);
+        --outline: var(--figma-color-border, #e2e5e9);
+        --text: var(--figma-color-text, #1f2328);
+        --muted: var(--figma-color-text-secondary, #6b7280);
+        --thumb-bg: var(--figma-color-bg, #ffffff);
+        --scrollbar: var(--figma-color-text-tertiary, #c9ced6);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        width: var(--frame-width);
+        height: var(--frame-height);
+        background: var(--bg);
+        color: var(--text);
+        font: 12px/1.4 Roboto, Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Helvetica Neue", sans-serif;
+        overflow: hidden;
+      }
+
+      .panel {
+        width: 100%;
+        height: 100%;
+        padding: 0;
+      }
+
+      .selection-list {
+        display: grid;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        overflow: auto;
+        scrollbar-gutter: stable;
+        background: var(--surface-container);
+        align-content: start;
+      }
+
+      .selection-list.is-empty {
+        align-content: center;
+      }
+
+      .selection-list.is-single {
+        align-content: center;
+      }
+
+      .selection-list.has-selection {
+        padding: 6px;
+        gap: 6px;
+      }
+
+      .selection-item {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        height: 48px;
+        padding: 8px 12px;
+        border-radius: 12px;
+        background: var(--selection-fill);
+        overflow: hidden;
+      }
+
+      .selection-thumb {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: var(--thumb-bg);
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+
+      .selection-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .selection-thumb-fallback {
+        width: 12px;
+        height: 12px;
+        border-radius: 4px;
+        background: var(--figma-color-bg-tertiary, #c9ccd3);
+      }
+
+      .selection-content {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+      }
+
+      .selection-name {
+        min-width: 0;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .selection-subtitle {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .selection-meta {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .selection-meta-divider {
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .selection-type {
+        max-width: 80px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .selection-list::-webkit-scrollbar {
+        width: 12px;
+      }
+
+      .selection-list::-webkit-scrollbar-thumb {
+        background: var(--scrollbar);
+        border-radius: 999px;
+        border: 4px solid transparent;
+        background-clip: padding-box;
+      }
+
+      .selection-list::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100%;
+        padding: 8px 12px;
+        border-radius: 12px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="panel">
+      <div id="selection-list" class="selection-list"></div>
+    </section>
+
+    <script>
+      const selectionList = document.getElementById("selection-list");
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function humanizeType(type) {
+        return String(type || "")
+          .toLowerCase()
+          .split("_")
+          .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+          .join(" ");
+      }
+
+      function fillSummary(fills) {
+        if (!Array.isArray(fills) || fills.length === 0) {
+          return "No fill";
+        }
+
+        if (fills.includes("image")) {
+          return "Image fill";
+        }
+
+        if (fills.includes("mixed")) {
+          return "Mixed fills";
+        }
+
+        if (fills.length === 1) {
+          return fills[0];
+        }
+
+        return `${fills.length} fills`;
+      }
+
+      function previewMarkup(item) {
+        if (item.previewDataUrl) {
+          return `<img src="${escapeHtml(item.previewDataUrl)}" alt="" />`;
+        }
+
+        return '<span class="selection-thumb-fallback"></span>';
+      }
+
+      function renderSelection(items) {
+        selectionList.innerHTML = "";
+        selectionList.className = "selection-list";
+
+        if (!items || items.length === 0) {
+          selectionList.classList.add("is-empty");
+          selectionList.innerHTML = '<div class="placeholder">No current selection</div>';
+          return;
+        }
+
+        selectionList.classList.add("has-selection");
+        if (items.length === 1) {
+          selectionList.classList.add("is-single");
+        }
+
+        items.forEach((item) => {
+          const element = document.createElement("article");
+          const fills = Array.isArray(item.fills) ? item.fills : [];
+          element.className = "selection-item";
+          element.innerHTML = `
+            <div class="selection-thumb">${previewMarkup(item)}</div>
+            <div class="selection-content">
+              <div class="selection-name">${escapeHtml(item.name)}</div>
+              <div class="selection-meta">
+                <div class="selection-subtitle">${escapeHtml(fillSummary(fills))}</div>
+                <div class="selection-meta-divider">•</div>
+                <div class="selection-type">${escapeHtml(humanizeType(item.type))}</div>
+              </div>
+            </div>
+          `;
+          selectionList.appendChild(element);
+        });
+      }
+
+      window.onmessage = (event) => {
+        const payload = event.data.pluginMessage;
+        if (!payload) {
+          return;
+        }
+
+        if (payload.type === "selection-summary") {
+          renderSelection(payload.selection || []);
+        }
+      };
+    </script>
+  </body>
+</html>

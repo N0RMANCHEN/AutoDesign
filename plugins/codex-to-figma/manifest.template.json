@@ -1,0 +1,10 @@
+{
+  "name": "Codex to Figma",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:3001"]
+  }
+}

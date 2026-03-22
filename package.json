@@ -1,0 +1,34 @@
+{
+  "name": "figmatest",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "npm run build:client && npm run build:server && npm run build:plugins",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:plugins": "node scripts/build-figma-plugins.mjs",
+    "plugin:status": "node --import tsx scripts/plugin-bridge-cli.ts status",
+    "plugin:preview": "node --import tsx scripts/plugin-bridge-cli.ts preview",
+    "plugin:send": "node --import tsx scripts/plugin-bridge-cli.ts send",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json"
+  },
+  "dependencies": {
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.11",
+    "@types/react": "19.0.10",
+    "@types/react-dom": "19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "5.8.2",
+    "vite": "^6.2.2"
+  }
+}

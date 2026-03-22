@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-server",
+    "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2020"],
+    "types": ["node"]
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["dist", "dist-server", "node_modules"]
+}

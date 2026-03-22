@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+dist
+dist-server
+.DS_Store
+*.log
+.codex
+data
