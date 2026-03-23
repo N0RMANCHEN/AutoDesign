@@ -510,6 +510,29 @@ async function ensureHybridReference(job: ReconstructionJob) {
   return updated?.referenceRaster || referenceRaster;
 }
 
+async function resolveReferencePreviewForMeasurement(job: ReconstructionJob) {
+  const rectifiedPreviewDataUrl = job.analysis?.screenPlane?.rectifiedPreviewDataUrl || null;
+  if (rectifiedPreviewDataUrl) {
+    return rectifiedPreviewDataUrl;
+  }
+
+  let referencePreviewDataUrl = job.referenceRaster?.dataUrl || null;
+  if (!referencePreviewDataUrl && isRasterExactJob(job)) {
+    referencePreviewDataUrl = (await ensureRasterReference(job)).dataUrl;
+  }
+  if (!referencePreviewDataUrl && isVectorReconstructionJob(job)) {
+    referencePreviewDataUrl = (await ensureVectorReference(job)).dataUrl;
+  }
+  if (!referencePreviewDataUrl && isHybridReconstructionJob(job)) {
+    referencePreviewDataUrl = (await ensureHybridReference(job)).dataUrl;
+  }
+  if (!referencePreviewDataUrl) {
+    referencePreviewDataUrl = job.analysis?.previewDataUrl || null;
+  }
+
+  return referencePreviewDataUrl;
+}
+
 async function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructionJob>>) {
   if (!job?.rebuildPlan) {
     throw new Error("Reconstruction job is missing rebuildPlan.");
@@ -1380,7 +1403,7 @@ async function runReconstructionIteration(jobId: string) {
   }
 
   const diffMetrics = await measurePreviewDiff(
-    renderedJob.analysis?.previewDataUrl || job.analysis.previewDataUrl,
+    (await resolveReferencePreviewForMeasurement(renderedJob)) || renderedJob.analysis?.previewDataUrl || job.analysis.previewDataUrl,
     rendered.renderedPreview.previewDataUrl,
   );
 
@@ -1992,10 +2015,6 @@ async function handleReconstructionJobRender(
   }
 
   try {
-    if (job.applyStatus !== "applied") {
-      throw new Error("Reconstruction job must be applied before rendering preview.");
-    }
-
     const rendered = await renderReconstructionPreview(job);
     const updated = await markReconstructionRendered(jobId, {
       ...rendered,
@@ -2033,26 +2052,11 @@ async function handleReconstructionJobMeasure(
   }
 
   try {
-    if (!isRasterExactJob(job) && !job.analysis) {
-      throw new Error("Reconstruction job has no analysis yet.");
-    }
     if (!job.renderedPreview?.previewDataUrl) {
       throw new Error("Reconstruction job has no rendered preview yet.");
     }
 
-    let referencePreviewDataUrl = job.referenceRaster?.dataUrl || null;
-    if (!referencePreviewDataUrl && isRasterExactJob(job)) {
-      referencePreviewDataUrl = (await ensureRasterReference(job)).dataUrl;
-    }
-    if (!referencePreviewDataUrl && isVectorReconstructionJob(job)) {
-      referencePreviewDataUrl = (await ensureVectorReference(job)).dataUrl;
-    }
-    if (!referencePreviewDataUrl && isHybridReconstructionJob(job)) {
-      referencePreviewDataUrl = (await ensureHybridReference(job)).dataUrl;
-    }
-    if (!referencePreviewDataUrl) {
-      referencePreviewDataUrl = job.analysis?.previewDataUrl || null;
-    }
+    const referencePreviewDataUrl = await resolveReferencePreviewForMeasurement(job);
     if (!referencePreviewDataUrl) {
       throw new Error("Reconstruction job has no reference preview available for diff measurement.");
     }

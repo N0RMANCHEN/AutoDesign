@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -57,13 +57,29 @@ async function ensureReconstructionFile() {
 
 async function readSnapshot(): Promise<ReconstructionJobSnapshot> {
   await ensureReconstructionFile();
-  const raw = await readFile(reconstructionFile, "utf8");
-  return JSON.parse(raw) as ReconstructionJobSnapshot;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const raw = await readFile(reconstructionFile, "utf8");
+      return JSON.parse(raw) as ReconstructionJobSnapshot;
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof SyntaxError) || attempt === 2) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Failed to read reconstruction snapshot.");
 }
 
 async function writeSnapshot(snapshot: ReconstructionJobSnapshot) {
   await ensureReconstructionFile();
-  await writeFile(reconstructionFile, JSON.stringify(snapshot, null, 2), "utf8");
+  const tempFile = `${reconstructionFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempFile, JSON.stringify(snapshot, null, 2), "utf8");
+  await rename(tempFile, reconstructionFile);
   return snapshot;
 }
 

@@ -197,6 +197,73 @@ export type ReconstructionDeprojectionNote = {
   targetId: string | null;
 };
 
+export type ReconstructionScreenPlane = {
+  extracted: boolean;
+  excludesNonUiShell: boolean;
+  confidence: number;
+  sourceQuad: ReconstructionPoint[];
+  rectifiedPreviewDataUrl: string | null;
+};
+
+export type ReconstructionSemanticNode = {
+  id: string;
+  name: string;
+  kind:
+    | "screen-root"
+    | "header"
+    | "section"
+    | "card"
+    | "pill"
+    | "group"
+    | "text"
+    | "primitive";
+  parentId: string | null;
+  bounds: ReconstructionBounds;
+  inferred: boolean;
+  surfaceRefId: string | null;
+  textRefId: string | null;
+  primitiveRefId: string | null;
+  layoutMode: "NONE" | "HORIZONTAL" | "VERTICAL";
+  itemSpacing: number | null;
+  paddingTop: number | null;
+  paddingRight: number | null;
+  paddingBottom: number | null;
+  paddingLeft: number | null;
+  fillHex: string | null;
+  cornerRadius: number | null;
+  componentName: string | null;
+};
+
+export type ReconstructionDesignTokens = {
+  colors: {
+    canvas: string | null;
+    accent: string | null;
+    foreground: string | null;
+    mutedForeground: string | null;
+    pillBackground: string | null;
+  };
+  radiusScale: number[];
+  spacingScale: number[];
+  typography: {
+    displayFamily: string | null;
+    textFamily: string | null;
+    headlineSize: number | null;
+    bodySize: number | null;
+    labelSize: number | null;
+    metricSize: number | null;
+  };
+};
+
+export type ReconstructionCompletionSuggestion = {
+  id: string;
+  name: string;
+  bounds: ReconstructionBounds;
+  strategy: "conservative-extend" | "continue-module-stack" | "leave-minimal";
+  summary: string;
+  priority: "low" | "medium" | "high";
+  inferred: boolean;
+};
+
 export type ReconstructionAnalysis = {
   previewDataUrl: string;
   mimeType: string;
@@ -204,9 +271,13 @@ export type ReconstructionAnalysis = {
   height: number;
   dominantColors: string[];
   canonicalFrame: ReconstructionCanonicalFrame | null;
+  screenPlane: ReconstructionScreenPlane | null;
   layoutRegions: ReconstructionRegion[];
   designSurfaces: ReconstructionDesignSurface[];
   vectorPrimitives: ReconstructionVectorPrimitive[];
+  semanticNodes: ReconstructionSemanticNode[];
+  designTokens: ReconstructionDesignTokens | null;
+  completionPlan: ReconstructionCompletionSuggestion[];
   textCandidates: ReconstructionTextCandidate[];
   textBlocks: ReconstructionTextBlock[];
   ocrBlocks: ReconstructionOcrBlock[];
@@ -402,6 +473,7 @@ export type ReconstructionContextPack = {
   targetNode: PluginNodeSummary;
   referenceNode: PluginNodeSummary;
   referencePreviewDataUrl: string;
+  referenceRectifiedPreviewDataUrl: string | null;
   targetPreviewDataUrl: string | null;
   currentAnalysis: ReconstructionAnalysis | null;
   currentFontMatches: ReconstructionFontMatch[];

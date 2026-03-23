@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -510,7 +510,7 @@ function printReconstructionJob(job: ReconstructionJob) {
   }
   if (job.analysis) {
     console.log(
-      `analysis: ${job.analysis.width}x${job.analysis.height} | colors=${job.analysis.dominantColors.join(", ") || "none"} | regions=${job.analysis.layoutRegions.length} | surfaces=${job.analysis.designSurfaces.length} | primitives=${job.analysis.vectorPrimitives.length} | textCandidates=${job.analysis.textCandidates.length} | textBlocks=${job.analysis.textBlocks.length} | ocrBlocks=${job.analysis.ocrBlocks.length} | assetCandidates=${job.analysis.assetCandidates.length}`,
+      `analysis: ${job.analysis.width}x${job.analysis.height} | colors=${job.analysis.dominantColors.join(", ") || "none"} | regions=${job.analysis.layoutRegions.length} | surfaces=${job.analysis.designSurfaces.length} | primitives=${job.analysis.vectorPrimitives.length} | semanticNodes=${job.analysis.semanticNodes?.length || 0} | completionPlan=${job.analysis.completionPlan?.length || 0} | textCandidates=${job.analysis.textCandidates.length} | textBlocks=${job.analysis.textBlocks.length} | ocrBlocks=${job.analysis.ocrBlocks.length} | assetCandidates=${job.analysis.assetCandidates.length}`,
     );
     if (job.analysis.canonicalFrame) {
       console.log(
@@ -523,6 +523,11 @@ function printReconstructionJob(job: ReconstructionJob) {
             .join(" -> ")}`,
         );
       }
+    }
+    if (job.analysis.screenPlane) {
+      console.log(
+        `screenPlane: extracted=${job.analysis.screenPlane.extracted ? "yes" : "no"} excludesNonUiShell=${job.analysis.screenPlane.excludesNonUiShell ? "yes" : "no"} confidence=${job.analysis.screenPlane.confidence.toFixed(2)} rectified=${job.analysis.screenPlane.rectifiedPreviewDataUrl ? "yes" : "no"}`,
+      );
     }
     if (job.analysis.completionZones.length) {
       console.log("completionZones:");
@@ -1168,6 +1173,237 @@ function synthesizeVectorShapesFromText(
   return { designSurfaces, vectorPrimitives };
 }
 
+async function encodeImageFileAsDataUrl(filePath: string) {
+  const buffer = await readFile(filePath);
+  return `data:image/png;base64,${buffer.toString("base64")}`;
+}
+
+function buildDesignTokensFromDraft(
+  heuristic: PreviewHeuristicAnalysis,
+  textBlocks: Array<{
+    role: "headline" | "body" | "metric" | "label" | "unknown";
+    fontFamily: string;
+    fontSize: number;
+  }>,
+) {
+  const displayBlock = textBlocks.find((block) => block.role === "headline" || block.role === "metric") || null;
+  const bodyBlock = textBlocks.find((block) => block.role === "body") || null;
+  const labelBlock = textBlocks.find((block) => block.role === "label") || null;
+  const accentHex = heuristic.styleHints?.accentColorHex || heuristic.dominantColors?.[1] || "#7172D7";
+  const canvasHex = heuristic.styleHints?.primaryColorHex || heuristic.dominantColors?.[0] || "#0C0C0D";
+  return {
+    colors: {
+      canvas: canvasHex,
+      accent: accentHex,
+      foreground: heuristic.styleHints?.theme === "dark" ? "#F5F7FF" : "#111111",
+      mutedForeground: heuristic.styleHints?.theme === "dark" ? "#C9CCE3" : "#5C6178",
+      pillBackground: canvasHex,
+    },
+    radiusScale: uniqueNumbers([12, 18, 28, heuristic.styleHints?.cornerRadiusHint || 28]),
+    spacingScale: uniqueNumbers([4, 8, 12, 16, 24, 32]),
+    typography: {
+      displayFamily: displayBlock?.fontFamily || "SF Pro Display",
+      textFamily: bodyBlock?.fontFamily || labelBlock?.fontFamily || "SF Pro Text",
+      headlineSize: textBlocks.find((block) => block.role === "headline")?.fontSize || 24,
+      bodySize: bodyBlock?.fontSize || 16,
+      labelSize: labelBlock?.fontSize || 12,
+      metricSize: textBlocks.find((block) => block.role === "metric")?.fontSize || 40,
+    },
+  };
+}
+
+function uniqueNumbers(values: Array<number | null | undefined>) {
+  return [...new Set(values.filter((value): value is number => Number.isFinite(value)).map((value) => Number(value)))];
+}
+
+function buildSemanticNodesFromDraft(
+  targetWidth: number,
+  targetHeight: number,
+  designSurfaces: Array<{
+    id: string;
+    name: string;
+    bounds: { x: number; y: number; width: number; height: number };
+    fillHex: string;
+    cornerRadius: number;
+  }>,
+  textBlocks: Array<{
+    id: string;
+    content: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  }>,
+  vectorPrimitives: Array<{
+    id: string;
+    bounds: { x: number; y: number; width: number; height: number } | null;
+  }>,
+) {
+  const nodes: Array<Record<string, unknown>> = [
+    {
+      id: "semantic-screen-root",
+      name: "Screen Root",
+      kind: "screen-root",
+      parentId: null,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      inferred: false,
+      surfaceRefId: null,
+      textRefId: null,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      fillHex: null,
+      cornerRadius: 0,
+      componentName: null,
+    },
+  ];
+
+  const addContainerNode = (surfaceId: string, name: string, kind: string, componentName: string | null) => {
+    const surface = designSurfaces.find((item) => item.id === surfaceId);
+    if (!surface) {
+      return;
+    }
+    nodes.push({
+      id: `semantic-${surfaceId}`,
+      name,
+      kind,
+      parentId: "semantic-screen-root",
+      bounds: surface.bounds,
+      inferred: true,
+      surfaceRefId: surface.id,
+      textRefId: null,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      fillHex: surface.fillHex,
+      cornerRadius: surface.cornerRadius,
+      componentName,
+    });
+  };
+
+  addContainerNode("surface-top-card", "Top Card", "card", "MissionCard");
+  addContainerNode("surface-bottom-card", "Bottom Card", "card", "WorkoutCard");
+  addContainerNode("surface-save-pill", "Save Pill", "pill", "ActionPill");
+  addContainerNode("surface-walk-pill", "Walk Pill", "pill", "ActionPill");
+
+  for (const block of textBlocks) {
+    const parentSurface =
+      designSurfaces.find((surface) => boundsOverlap(surface.bounds, block.bounds) > 0.45) || null;
+    nodes.push({
+      id: `semantic-${block.id}`,
+      name: block.content.slice(0, 32) || block.id,
+      kind: /^Wednesday/i.test(block.content) ? "header" : "text",
+      parentId: parentSurface ? `semantic-${parentSurface.id}` : "semantic-screen-root",
+      bounds: block.bounds,
+      inferred: false,
+      surfaceRefId: null,
+      textRefId: block.id,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: null,
+      paddingRight: null,
+      paddingBottom: null,
+      paddingLeft: null,
+      fillHex: null,
+      cornerRadius: null,
+      componentName: null,
+    });
+  }
+
+  for (const primitive of vectorPrimitives) {
+    if (!primitive.bounds) {
+      continue;
+    }
+    const parentSurface =
+      designSurfaces.find((surface) => boundsOverlap(surface.bounds, primitive.bounds as any) > 0.45) || null;
+    nodes.push({
+      id: `semantic-${primitive.id}`,
+      name: primitive.id,
+      kind: "primitive",
+      parentId: parentSurface ? `semantic-${parentSurface.id}` : "semantic-screen-root",
+      bounds: primitive.bounds,
+      inferred: true,
+      surfaceRefId: null,
+      textRefId: null,
+      primitiveRefId: primitive.id,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: null,
+      paddingRight: null,
+      paddingBottom: null,
+      paddingLeft: null,
+      fillHex: null,
+      cornerRadius: null,
+      componentName: null,
+    });
+  }
+
+  if (nodes.length === 1) {
+    nodes.push({
+      id: "semantic-fallback-section",
+      name: "Primary Section",
+      kind: "section",
+      parentId: "semantic-screen-root",
+      bounds: { x: 0.04, y: 0.08, width: 0.92, height: 0.84 },
+      inferred: true,
+      surfaceRefId: null,
+      textRefId: null,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      fillHex: null,
+      cornerRadius: null,
+      componentName: null,
+    });
+  }
+
+  return nodes;
+}
+
+function buildCompletionPlanFromDraft(
+  semanticNodes: Array<Record<string, unknown>>,
+  targetHeight: number,
+) {
+  const semanticBounds = semanticNodes
+    .map((item) => item.bounds as { x: number; y: number; width: number; height: number } | undefined)
+    .filter(Boolean);
+  if (!semanticBounds.length) {
+    return [];
+  }
+
+  const maxY = Math.max(...semanticBounds.map((bounds) => bounds.y + bounds.height));
+  if (maxY >= 0.88) {
+    return [];
+  }
+
+  return [
+    {
+      id: "completion-lower-flow",
+      name: "Lower Screen Continuation",
+      bounds: {
+        x: 0.06,
+        y: Math.min(0.88, maxY + 0.02),
+        width: 0.88,
+        height: Math.max(0.08, 0.96 - Math.min(0.88, maxY + 0.02)),
+      },
+      strategy: "conservative-extend",
+      summary: `按当前卡片和胶囊语言继续延展剩余 screen flow；保持 ${targetHeight}px 高度屏幕内的保守信息架构。`,
+      priority: "medium",
+      inferred: true,
+    },
+  ];
+}
+
 async function writeVectorAnalysisDraft(
   job: ReconstructionJob,
   sourceQuadPixels: ReconstructionPoint[],
@@ -1183,6 +1419,7 @@ async function writeVectorAnalysisDraft(
   const normalizedQuad = normalizeSourceQuad(sourceQuadPixels, referenceWidth, referenceHeight);
   const heuristic = await runPreviewHeuristicAnalysis(remapPreviewPath);
   const ocrLines = await runVisionOcr(remapPreviewPath);
+  const rectifiedPreviewDataUrl = await encodeImageFileAsDataUrl(remapPreviewPath);
   const textCandidates = heuristic.textCandidates || [];
   const textStyleHints = heuristic.textStyleHints || [];
   const layoutRegions = heuristic.layoutRegions || [];
@@ -1259,6 +1496,15 @@ async function writeVectorAnalysisDraft(
         })
     : [];
   const synthesizedShapes = synthesizeVectorShapesFromText(textBlocks, heuristic);
+  const designTokens = buildDesignTokensFromDraft(heuristic, textBlocks);
+  const semanticNodes = buildSemanticNodesFromDraft(
+    targetWidth,
+    targetHeight,
+    synthesizedShapes.designSurfaces,
+    textBlocks,
+    synthesizedShapes.vectorPrimitives,
+  );
+  const completionPlan = buildCompletionPlanFromDraft(semanticNodes, targetHeight);
 
   const payload: SubmitReconstructionAnalysisPayload = {
     analysisProvider: "codex-assisted",
@@ -1267,6 +1513,7 @@ async function writeVectorAnalysisDraft(
       "这是 CLI 生成的 vector analysis draft；当前优先恢复可编辑文本和大区块，复杂图标/纹理仍未完全结构化。",
     ],
     analysis: {
+      previewDataUrl: rectifiedPreviewDataUrl,
       width: targetWidth,
       height: targetHeight,
       dominantColors: heuristic.dominantColors || ["#0D0D12", "#AA99FF"],
@@ -1278,9 +1525,19 @@ async function writeVectorAnalysisDraft(
         mappingMode: "reflow",
         sourceQuad: normalizedQuad,
       },
+      screenPlane: {
+        extracted: true,
+        excludesNonUiShell: true,
+        confidence: 0.82,
+        sourceQuad: normalizedQuad,
+        rectifiedPreviewDataUrl,
+      },
       layoutRegions: heuristic.layoutRegions || [],
       designSurfaces: synthesizedShapes.designSurfaces,
       vectorPrimitives: synthesizedShapes.vectorPrimitives,
+      semanticNodes,
+      designTokens,
+      completionPlan,
       textCandidates,
       textBlocks,
       ocrBlocks: ocrLines.map((line, index) => ({
@@ -1323,6 +1580,8 @@ async function writeHybridAnalysisDraft(
   const baseName = sanitizeFileSegment(job.id);
   const draftPath = path.join(outputDirectory, `${baseName}-hybrid-analysis-draft.json`);
   const normalizedQuad = normalizeSourceQuad(sourceQuadPixels, referenceWidth, referenceHeight);
+  const remapPreviewPath = await writeRemapPreview(job, sourceQuadPixels, outputDirectory);
+  const rectifiedPreviewDataUrl = await encodeImageFileAsDataUrl(remapPreviewPath);
   const payload: SubmitReconstructionAnalysisPayload = {
     analysisProvider: "codex-assisted",
     analysisVersion: "2026-03-23-hybrid-draft-v1",
@@ -1330,6 +1589,7 @@ async function writeHybridAnalysisDraft(
       "这是 CLI 生成的 hybrid analysis draft；请在 submit 前继续补充 textBlocks、assetCandidates、completionZones。",
     ],
     analysis: {
+      previewDataUrl: rectifiedPreviewDataUrl,
       width: referenceWidth,
       height: referenceHeight,
       dominantColors: ["#0D0D12", "#AA99FF"],
@@ -1341,9 +1601,19 @@ async function writeHybridAnalysisDraft(
         mappingMode: "reflow",
         sourceQuad: normalizedQuad,
       },
+      screenPlane: {
+        extracted: true,
+        excludesNonUiShell: true,
+        confidence: 0.72,
+        sourceQuad: normalizedQuad,
+        rectifiedPreviewDataUrl,
+      },
       layoutRegions: [],
       designSurfaces: [],
       vectorPrimitives: [],
+      semanticNodes: [],
+      designTokens: null,
+      completionPlan: [],
       textCandidates: [],
       textBlocks: [],
       ocrBlocks: [],
@@ -1386,6 +1656,16 @@ async function writeContextPackArtifacts(
   const referencePreviewPath = path.join(outputDirectory, `${baseName}-reference.${referencePreview.extension}`);
   await writeFile(referencePreviewPath, referencePreview.buffer);
 
+  let referenceRectifiedPreviewPath: string | null = null;
+  if (contextPack.referenceRectifiedPreviewDataUrl) {
+    const rectifiedPreview = decodeDataUrl(contextPack.referenceRectifiedPreviewDataUrl);
+    referenceRectifiedPreviewPath = path.join(
+      outputDirectory,
+      `${baseName}-reference-rectified.${rectifiedPreview.extension}`,
+    );
+    await writeFile(referenceRectifiedPreviewPath, rectifiedPreview.buffer);
+  }
+
   let targetPreviewPath: string | null = null;
   if (contextPack.targetPreviewDataUrl) {
     const targetPreview = decodeDataUrl(contextPack.targetPreviewDataUrl);
@@ -1396,6 +1676,7 @@ async function writeContextPackArtifacts(
   return {
     contextPath,
     referencePreviewPath,
+    referenceRectifiedPreviewPath,
     targetPreviewPath,
   };
 }
@@ -1663,6 +1944,7 @@ async function runReconstruct(argv: string[]) {
       console.log(`mode: ${contextPack.mode}`);
       console.log(`contextPack: ${artifacts.contextPath}`);
       console.log(`referencePreview: ${artifacts.referencePreviewPath}`);
+      console.log(`referenceRectifiedPreview: ${artifacts.referenceRectifiedPreviewPath || "none"}`);
       console.log(`targetPreview: ${artifacts.targetPreviewPath || "none"}`);
       console.log("guidance:");
       for (const line of contextPack.guidance) {

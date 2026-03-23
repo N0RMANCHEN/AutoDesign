@@ -12,7 +12,9 @@ import type {
   ReconstructionBounds,
   ReconstructionCanonicalFrame,
   ReconstructionCompletionZone,
+  ReconstructionCompletionSuggestion,
   ReconstructionDeprojectionNote,
+  ReconstructionDesignTokens,
   ReconstructionDesignSurface,
   ReconstructionFontMatch,
   ReconstructionJob,
@@ -21,6 +23,8 @@ import type {
   ReconstructionPoint,
   ReconstructionRegion,
   ReconstructionReviewFlag,
+  ReconstructionScreenPlane,
+  ReconstructionSemanticNode,
   ReconstructionTextCandidate,
   ReconstructionTextBlock,
   ReconstructionTextStyleHint,
@@ -300,6 +304,26 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function uniqueNumbers(values: Array<number | null | undefined>) {
+  return [...new Set(values.filter((value): value is number => Number.isFinite(value)).map(Number))];
+}
+
+function boundsOverlap(
+  left: ReconstructionBounds,
+  right: ReconstructionBounds,
+) {
+  const leftRight = left.x + left.width;
+  const leftBottom = left.y + left.height;
+  const rightRight = right.x + right.width;
+  const rightBottom = right.y + right.height;
+  const overlapWidth = Math.max(0, Math.min(leftRight, rightRight) - Math.max(left.x, right.x));
+  const overlapHeight = Math.max(0, Math.min(leftBottom, rightBottom) - Math.max(left.y, right.y));
+  const overlapArea = overlapWidth * overlapHeight;
+  const leftArea = Math.max(0.0001, left.width * left.height);
+  const rightArea = Math.max(0.0001, right.width * right.height);
+  return overlapArea / Math.min(leftArea, rightArea);
+}
+
 function normalizeStyleHints(input: any, dominantColors: string[]) {
   const primary = typeof input?.primaryColorHex === "string" ? input.primaryColorHex.toUpperCase() : null;
   const accent = typeof input?.accentColorHex === "string" ? input.accentColorHex.toUpperCase() : null;
@@ -345,6 +369,26 @@ function normalizeCanonicalFrame(
           ? "center"
           : "extend",
     ...(sourceQuad.length === 4 ? { sourceQuad } : {}),
+  };
+}
+
+function normalizeScreenPlane(input: unknown): ReconstructionScreenPlane | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const rectifiedPreviewDataUrl =
+    typeof (input as any)?.rectifiedPreviewDataUrl === "string" &&
+    (input as any).rectifiedPreviewDataUrl.startsWith("data:image/")
+      ? (input as any).rectifiedPreviewDataUrl
+      : null;
+  const sourceQuad = normalizePoints((input as any)?.sourceQuad).slice(0, 4);
+  return {
+    extracted: (input as any)?.extracted !== false,
+    excludesNonUiShell: (input as any)?.excludesNonUiShell !== false,
+    confidence: Number.isFinite((input as any)?.confidence) ? Number((input as any).confidence) : 0.5,
+    sourceQuad,
+    rectifiedPreviewDataUrl,
   };
 }
 
@@ -421,6 +465,109 @@ function normalizeVectorPrimitives(input: unknown): ReconstructionVectorPrimitiv
     .slice(0, 80);
 }
 
+function normalizeSemanticNodes(input: unknown): ReconstructionSemanticNode[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item, index) => ({
+      id: typeof (item as any)?.id === "string" ? (item as any).id : `semantic-${index + 1}`,
+      name:
+        typeof (item as any)?.name === "string" && (item as any).name.trim()
+          ? (item as any).name.trim()
+          : `Semantic ${index + 1}`,
+      kind:
+        (item as any)?.kind === "screen-root" ||
+        (item as any)?.kind === "header" ||
+        (item as any)?.kind === "section" ||
+        (item as any)?.kind === "card" ||
+        (item as any)?.kind === "pill" ||
+        (item as any)?.kind === "group" ||
+        (item as any)?.kind === "text" ||
+        (item as any)?.kind === "primitive"
+          ? (item as any).kind
+          : "group",
+      parentId:
+        typeof (item as any)?.parentId === "string" && (item as any).parentId.trim()
+          ? (item as any).parentId.trim()
+          : null,
+      bounds: normalizeBounds((item as any)?.bounds),
+      inferred: Boolean((item as any)?.inferred),
+      surfaceRefId:
+        typeof (item as any)?.surfaceRefId === "string" && (item as any).surfaceRefId.trim()
+          ? (item as any).surfaceRefId.trim()
+          : null,
+      textRefId:
+        typeof (item as any)?.textRefId === "string" && (item as any).textRefId.trim()
+          ? (item as any).textRefId.trim()
+          : null,
+      primitiveRefId:
+        typeof (item as any)?.primitiveRefId === "string" && (item as any).primitiveRefId.trim()
+          ? (item as any).primitiveRefId.trim()
+          : null,
+      layoutMode:
+        (item as any)?.layoutMode === "HORIZONTAL" || (item as any)?.layoutMode === "VERTICAL"
+          ? (item as any).layoutMode
+          : "NONE",
+      itemSpacing: Number.isFinite((item as any)?.itemSpacing) ? Number((item as any).itemSpacing) : null,
+      paddingTop: Number.isFinite((item as any)?.paddingTop) ? Number((item as any).paddingTop) : null,
+      paddingRight: Number.isFinite((item as any)?.paddingRight) ? Number((item as any).paddingRight) : null,
+      paddingBottom: Number.isFinite((item as any)?.paddingBottom) ? Number((item as any).paddingBottom) : null,
+      paddingLeft: Number.isFinite((item as any)?.paddingLeft) ? Number((item as any).paddingLeft) : null,
+      fillHex:
+        typeof (item as any)?.fillHex === "string" ? (item as any).fillHex.toUpperCase() : null,
+      cornerRadius:
+        Number.isFinite((item as any)?.cornerRadius) ? Number((item as any).cornerRadius) : null,
+      componentName:
+        typeof (item as any)?.componentName === "string" && (item as any).componentName.trim()
+          ? (item as any).componentName.trim()
+          : null,
+    }))
+    .filter((item) => item.bounds.width > 0 && item.bounds.height > 0)
+    .slice(0, 80);
+}
+
+function normalizeDesignTokens(input: unknown): ReconstructionDesignTokens | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const typography = (input as any)?.typography || {};
+  const colors = (input as any)?.colors || {};
+  return {
+    colors: {
+      canvas: typeof colors.canvas === "string" ? colors.canvas.toUpperCase() : null,
+      accent: typeof colors.accent === "string" ? colors.accent.toUpperCase() : null,
+      foreground: typeof colors.foreground === "string" ? colors.foreground.toUpperCase() : null,
+      mutedForeground:
+        typeof colors.mutedForeground === "string" ? colors.mutedForeground.toUpperCase() : null,
+      pillBackground:
+        typeof colors.pillBackground === "string" ? colors.pillBackground.toUpperCase() : null,
+    },
+    radiusScale: Array.isArray((input as any)?.radiusScale)
+      ? (input as any).radiusScale.filter((value: unknown) => Number.isFinite(value)).map(Number).slice(0, 8)
+      : [],
+    spacingScale: Array.isArray((input as any)?.spacingScale)
+      ? (input as any).spacingScale.filter((value: unknown) => Number.isFinite(value)).map(Number).slice(0, 8)
+      : [],
+    typography: {
+      displayFamily:
+        typeof typography.displayFamily === "string" && typography.displayFamily.trim()
+          ? typography.displayFamily.trim()
+          : null,
+      textFamily:
+        typeof typography.textFamily === "string" && typography.textFamily.trim()
+          ? typography.textFamily.trim()
+          : null,
+      headlineSize: Number.isFinite(typography.headlineSize) ? Number(typography.headlineSize) : null,
+      bodySize: Number.isFinite(typography.bodySize) ? Number(typography.bodySize) : null,
+      labelSize: Number.isFinite(typography.labelSize) ? Number(typography.labelSize) : null,
+      metricSize: Number.isFinite(typography.metricSize) ? Number(typography.metricSize) : null,
+    },
+  };
+}
+
 function normalizeTextBlocks(input: unknown): ReconstructionTextBlock[] {
   if (!Array.isArray(input)) {
     return [];
@@ -491,6 +638,38 @@ function normalizeCompletionZones(input: unknown): ReconstructionCompletionZone[
     }))
     .filter((item) => item.bounds.width > 0 && item.bounds.height > 0)
     .slice(0, 16);
+}
+
+function normalizeCompletionPlan(input: unknown): ReconstructionCompletionSuggestion[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item, index) => ({
+      id: typeof (item as any)?.id === "string" ? (item as any).id : `completion-plan-${index + 1}`,
+      name:
+        typeof (item as any)?.name === "string" && (item as any).name.trim()
+          ? (item as any).name.trim()
+          : `Completion ${index + 1}`,
+      bounds: normalizeBounds((item as any)?.bounds),
+      strategy:
+        (item as any)?.strategy === "continue-module-stack" ||
+        (item as any)?.strategy === "leave-minimal"
+          ? (item as any).strategy
+          : "conservative-extend",
+      summary:
+        typeof (item as any)?.summary === "string" && (item as any).summary.trim()
+          ? (item as any).summary.trim()
+          : "",
+      priority:
+        (item as any)?.priority === "high" || (item as any)?.priority === "low"
+          ? (item as any).priority
+          : "medium",
+      inferred: (item as any)?.inferred !== false,
+    }))
+    .filter((item) => item.bounds.width > 0 && item.bounds.height > 0 && item.summary)
+    .slice(0, 20);
 }
 
 function normalizeDeprojectionNotes(input: unknown): ReconstructionDeprojectionNote[] {
@@ -653,6 +832,148 @@ function synthesizeSurfacesFromRegions(
     shadow: styleHints.shadowHint,
     inferred: false,
   }));
+}
+
+function synthesizeDesignTokens(
+  styleHints: ReconstructionAnalysis["styleHints"],
+  textBlocks: ReconstructionTextBlock[],
+): ReconstructionDesignTokens {
+  const headline = textBlocks.find((block) => block.role === "headline") || null;
+  const metric = textBlocks.find((block) => block.role === "metric") || null;
+  const body = textBlocks.find((block) => block.role === "body") || null;
+  const label = textBlocks.find((block) => block.role === "label") || null;
+  return {
+    colors: {
+      canvas: styleHints.primaryColorHex,
+      accent: styleHints.accentColorHex,
+      foreground: styleHints.theme === "dark" ? "#F5F7FF" : "#111111",
+      mutedForeground: styleHints.theme === "dark" ? "#C9CCE3" : "#5C6178",
+      pillBackground: styleHints.primaryColorHex,
+    },
+    radiusScale: uniqueNumbers([12, 18, styleHints.cornerRadiusHint]),
+    spacingScale: uniqueNumbers([4, 8, 12, 16, 24, 32]),
+    typography: {
+      displayFamily: headline?.fontFamily || metric?.fontFamily || "SF Pro Display",
+      textFamily: body?.fontFamily || label?.fontFamily || "SF Pro Text",
+      headlineSize: headline?.fontSize || 24,
+      bodySize: body?.fontSize || 16,
+      labelSize: label?.fontSize || 12,
+      metricSize: metric?.fontSize || 40,
+    },
+  };
+}
+
+function synthesizeSemanticNodes(
+  analysis: Pick<
+    ReconstructionAnalysis,
+    "designSurfaces" | "textBlocks" | "vectorPrimitives" | "styleHints"
+  >,
+): ReconstructionSemanticNode[] {
+  const nodes: ReconstructionSemanticNode[] = [
+    {
+      id: "semantic-screen-root",
+      name: "Screen Root",
+      kind: "screen-root",
+      parentId: null,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      inferred: false,
+      surfaceRefId: null,
+      textRefId: null,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      fillHex: analysis.styleHints.primaryColorHex,
+      cornerRadius: 0,
+      componentName: null,
+    },
+  ];
+
+  for (const surface of analysis.designSurfaces) {
+    nodes.push({
+      id: `semantic-${surface.id}`,
+      name: surface.name || surface.id,
+      kind: /pill/i.test(surface.name || surface.id)
+        ? "pill"
+        : /card/i.test(surface.name || surface.id)
+          ? "card"
+          : "section",
+      parentId: "semantic-screen-root",
+      bounds: surface.bounds,
+      inferred: surface.inferred,
+      surfaceRefId: surface.id,
+      textRefId: null,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      fillHex: surface.fillHex,
+      cornerRadius: surface.cornerRadius,
+      componentName: /pill/i.test(surface.name || surface.id) ? "ActionPill" : null,
+    });
+  }
+
+  for (const block of analysis.textBlocks) {
+    const parentSurface = analysis.designSurfaces.find(
+      (surface) => boundsOverlap(surface.bounds, block.bounds) > 0.45,
+    );
+    nodes.push({
+      id: `semantic-${block.id}`,
+      name: block.content.slice(0, 32) || block.id,
+      kind: /^Wednesday/i.test(block.content) ? "header" : "text",
+      parentId: parentSurface ? `semantic-${parentSurface.id}` : "semantic-screen-root",
+      bounds: block.bounds,
+      inferred: block.inferred,
+      surfaceRefId: null,
+      textRefId: block.id,
+      primitiveRefId: null,
+      layoutMode: "NONE",
+      itemSpacing: null,
+      paddingTop: null,
+      paddingRight: null,
+      paddingBottom: null,
+      paddingLeft: null,
+      fillHex: block.colorHex,
+      cornerRadius: null,
+      componentName: null,
+    });
+  }
+
+  return nodes;
+}
+
+function synthesizeCompletionPlan(
+  semanticNodes: ReconstructionSemanticNode[],
+): ReconstructionCompletionSuggestion[] {
+  const maxY = semanticNodes.length
+    ? Math.max(...semanticNodes.map((item) => item.bounds.y + item.bounds.height))
+    : 1;
+  if (maxY >= 0.88) {
+    return [];
+  }
+
+  return [
+    {
+      id: "completion-lower-flow",
+      name: "Lower Screen Continuation",
+      bounds: {
+        x: 0.06,
+        y: Math.min(0.9, maxY + 0.02),
+        width: 0.88,
+        height: Math.max(0.08, 0.96 - Math.min(0.9, maxY + 0.02)),
+      },
+      strategy: "conservative-extend",
+      summary: "按当前卡片、圆角和 CTA 语言保守延展剩余 screen flow。",
+      priority: "medium",
+      inferred: true,
+    },
+  ];
 }
 
 function buildReviewFlags(
@@ -1204,6 +1525,7 @@ export function buildReconstructionContextPack(job: ReconstructionJob): Reconstr
     targetNode: job.targetNode,
     referenceNode: job.referenceNode,
     referencePreviewDataUrl: job.referenceRaster?.dataUrl || job.referenceNode.previewDataUrl,
+    referenceRectifiedPreviewDataUrl: job.analysis?.screenPlane?.rectifiedPreviewDataUrl || null,
     targetPreviewDataUrl: job.targetNode.previewDataUrl || null,
     currentAnalysis: job.analysis,
     currentFontMatches: job.fontMatches,
@@ -1265,6 +1587,10 @@ export function buildNormalizedReconstructionAnalysis(
   }
 
   const rawAnalysis = (payload.analysis || {}) as Record<string, unknown>;
+  const analysisPreviewDataUrl =
+    typeof rawAnalysis.previewDataUrl === "string" && rawAnalysis.previewDataUrl.startsWith("data:image/")
+      ? rawAnalysis.previewDataUrl
+      : job.referenceNode.previewDataUrl;
   const mimeType =
     typeof rawAnalysis.mimeType === "string" && rawAnalysis.mimeType.trim()
       ? rawAnalysis.mimeType.trim()
@@ -1284,21 +1610,29 @@ export function buildNormalizedReconstructionAnalysis(
   const normalizedTextStyleHints = normalizeTextStyleHints(rawAnalysis.textStyleHints);
   const designSurfacesRaw = normalizeDesignSurfaces(rawAnalysis.designSurfaces);
   const vectorPrimitives = normalizeVectorPrimitives(rawAnalysis.vectorPrimitives);
+  const semanticNodes = normalizeSemanticNodes(rawAnalysis.semanticNodes);
+  const designTokens = normalizeDesignTokens(rawAnalysis.designTokens);
+  const completionPlan = normalizeCompletionPlan(rawAnalysis.completionPlan);
   const completionZones = normalizeCompletionZones(rawAnalysis.completionZones);
   const deprojectionNotes = normalizeDeprojectionNotes(rawAnalysis.deprojectionNotes);
-  const analysis: ReconstructionAnalysis = {
-    previewDataUrl: job.referenceNode.previewDataUrl,
+  const designSurfaces =
+    designSurfacesRaw.length > 0
+      ? designSurfacesRaw
+      : synthesizeSurfacesFromRegions(layoutRegions, styleHints);
+  const analysisBase: ReconstructionAnalysis = {
+    previewDataUrl: analysisPreviewDataUrl,
     mimeType,
     width: rawWidth,
     height: rawHeight,
     dominantColors,
     canonicalFrame: normalizeCanonicalFrame(rawAnalysis.canonicalFrame, job, rawWidth, rawHeight),
+    screenPlane: normalizeScreenPlane(rawAnalysis.screenPlane),
     layoutRegions,
-    designSurfaces:
-      designSurfacesRaw.length > 0
-        ? designSurfacesRaw
-        : synthesizeSurfacesFromRegions(layoutRegions, styleHints),
+    designSurfaces,
     vectorPrimitives,
+    semanticNodes,
+    designTokens,
+    completionPlan,
     textCandidates,
     textBlocks: normalizedTextBlocks,
     ocrBlocks: normalizedOcrBlocks.length > 0 ? normalizedOcrBlocks : synthesizeOcrBlocks(textCandidates),
@@ -1318,6 +1652,17 @@ export function buildNormalizedReconstructionAnalysis(
         )
       : ["当前分析结果仍包含需要人工确认的区域。"],
   };
+  const derivedSemanticNodes =
+    analysisBase.semanticNodes.length > 0 ? analysisBase.semanticNodes : synthesizeSemanticNodes(analysisBase);
+  const analysis: ReconstructionAnalysis = {
+    ...analysisBase,
+    semanticNodes: derivedSemanticNodes,
+    designTokens: analysisBase.designTokens || synthesizeDesignTokens(styleHints, normalizedTextBlocks),
+    completionPlan:
+      analysisBase.completionPlan.length > 0
+        ? analysisBase.completionPlan
+        : synthesizeCompletionPlan(derivedSemanticNodes),
+  };
 
   const warnings = uniqueStrings([...(payload.warnings || [])]);
   if (!analysis.width || !analysis.height) {
@@ -1335,6 +1680,12 @@ export function buildNormalizedReconstructionAnalysis(
     }
     if (!analysis.canonicalFrame?.deprojected) {
       warnings.push("vector-reconstruction 预期输出正视正交布局，当前 analysis 未显式声明 deprojected。");
+    }
+    if (!analysis.screenPlane?.rectifiedPreviewDataUrl) {
+      warnings.push("vector-reconstruction 当前缺少 rectified screen preview；后续评分仍可能偏向原始透视截图。");
+    }
+    if (analysis.semanticNodes.length === 0) {
+      warnings.push("vector-reconstruction 当前缺少 semanticNodes；apply 将回退到扁平 surface/text 结构。");
     }
   }
   if (job.input.strategy === "hybrid-reconstruction") {
