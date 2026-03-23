@@ -11,8 +11,10 @@
 
 - `npm run acceptance:new`
 - `npm run acceptance:preflight`
+- `npm run acceptance:prep`
 - `npm run acceptance:new -- --scenario live-figma-bridge --owner <name>`
 - `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
+- [reports/acceptance/RUNBOOK.md](RUNBOOK.md)
 
 命名约定：
 
@@ -40,12 +42,15 @@ JSON 结构遵守：
 live 验收前建议先执行：
 
 - `npm run acceptance:preflight`
+- `npm run acceptance:prep -- --owner <name>`
 
 它会在 `reports/acceptance/artifacts/<timestamp>/` 下写入：
 
 - `plugin-bridge-snapshot.json`
 - `preflight-summary.txt`
 - 当前 selection 可导出的 preview PNG
+
+`acceptance:prep` 会额外同步创建同 timestamp 的 `.md + .json` 验收记录骨架，适合正式 live 验收前直接使用。
 
 不适用内容：
 

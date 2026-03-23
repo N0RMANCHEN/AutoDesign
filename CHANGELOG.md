@@ -37,6 +37,7 @@
 - 新增 [server/api-routes.test.ts](server/api-routes.test.ts)，用临时端口拉起本地 API，覆盖 plugin session 注册、reconstruction job create/list/get、`context-pack` 构建、`submit-analysis` 参数校验和 404 route，开始把验证从 CLI fixture 扩展到真实 HTTP route 层
 - 新增 [scripts/create-acceptance-report.mjs](scripts/create-acceptance-report.mjs) 和 [scripts/create-acceptance-report.test.ts](scripts/create-acceptance-report.test.ts)，提供 `npm run acceptance:new` 脚手架，能直接生成 live bridge / reconstruction / plugin smoke 的验收 `.md + .json` 报告骨架
 - 新增 [scripts/create-acceptance-preflight.mjs](scripts/create-acceptance-preflight.mjs) 和 [scripts/create-acceptance-preflight.test.ts](scripts/create-acceptance-preflight.test.ts)，提供 `npm run acceptance:preflight`，能在 live 验收前先落盘 bridge snapshot、selection summary 和 preview artifact
+- 新增 [scripts/prepare-live-acceptance.mjs](scripts/prepare-live-acceptance.mjs)、[scripts/prepare-live-acceptance.test.ts](scripts/prepare-live-acceptance.test.ts) 和 [reports/acceptance/RUNBOOK.md](reports/acceptance/RUNBOOK.md)，提供 `npm run acceptance:prep`，把 live 验收记录骨架与 preflight artifact 用同一 timestamp 一次准备好，并固定最后的实机验收步骤
 
 ### Changed
 

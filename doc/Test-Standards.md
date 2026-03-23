@@ -118,6 +118,7 @@
 - 报告 JSON 默认执行：`npm run check:report-schemas`
 - live 验收脚手架默认入口：`npm run acceptance:new`
 - live 验收预检入口：`npm run acceptance:preflight`
+- live 验收一键准备入口：`npm run acceptance:prep`
 
 ## 3. 命名与结构规则
 
