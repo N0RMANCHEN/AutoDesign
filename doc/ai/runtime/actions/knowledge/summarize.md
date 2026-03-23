@@ -1,5 +1,8 @@
 # Action Prompt - Knowledge / Summarize Node
 
+Schema: `doc/ai/runtime/contracts/graphpatch.knowledge.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 目标：为选中的知识节点生成简明摘要，帮助设计评审、实现讨论或问题复盘时快速回顾核心信息。
 
 要求：

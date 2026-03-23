@@ -1,24 +1,28 @@
 # AutoDesign Project Map
 
-这份文档帮助你快速理解仓库结构、阅读路径和两条核心工作流从哪里开始。
+这份文档用于回答三件事：
+
+1. 仓库里有哪些系统
+2. 不同任务应该先读哪里
+3. 哪份文档对哪类事实负责
 
 ## 一句话先记住
 
-这个仓库不是单一前端应用，也不是单一插件 demo，而是一个单仓工作流：
+这不是单一前端应用，也不是单一插件 demo，而是一个单仓工作流：
 
 - `Plugin System`
   让 AI 可以读取和修改 Figma
 - `Workspace System`
-  让 Figma 设计事实转成更稳定的前端改造输入
+  让设计事实转成更稳定的前端改造输入
 - `Bridge + Shared`
-  把命令、上下文和能力协议串起来
+  负责命令、上下文和能力协议
 
-## 当前仓库结构
+## 仓库结构
 
 ```text
 .
-├─ AGENT.md
 ├─ README.md
+├─ AGENT.md
 ├─ contributing_ai.md
 ├─ CHANGELOG.md
 ├─ doc/
@@ -30,52 +34,72 @@
 └─ src/
 ```
 
-## 各目录负责什么
+## 目录职责
 
 - `src/`
   Vite + React 工作台
 - `server/`
-  本地 Node API、bridge、reconstruction orchestration
+  本地 API、bridge、reconstruction orchestration
 - `shared/`
   capability registry、命令协议、共享类型
 - `plugins/autodesign/`
   正式 Figma 插件执行器
 - `plugins/autodesign-smoke/`
-  插件导入 smoke 验证
+  构建产物 smoke 校验
 - `doc/`
-  治理、标准、架构、路线图、计划
+  治理、标准、架构、路线图、AI 文档、计划
 - `reports/`
-  验收、质量、事故和归档证据
+  验收、质量、事故、归档证据
 
-## 最短阅读路径
+## 按任务选择阅读路径
 
-1. [README.md](/Users/BofeiChen/AutoDesign/README.md)
-2. [AGENT.md](/Users/BofeiChen/AutoDesign/AGENT.md)
-3. [doc/Architecture-Folder-Governance.md](/Users/BofeiChen/AutoDesign/doc/Architecture-Folder-Governance.md)
-4. [doc/Product-Standards.md](/Users/BofeiChen/AutoDesign/doc/Product-Standards.md)
-5. [doc/Test-Standards.md](/Users/BofeiChen/AutoDesign/doc/Test-Standards.md)
-6. [doc/Roadmap.md](/Users/BofeiChen/AutoDesign/doc/Roadmap.md)
-7. [doc/Architecture.md](/Users/BofeiChen/AutoDesign/doc/Architecture.md)
-8. [doc/Capability-Catalog.md](/Users/BofeiChen/AutoDesign/doc/Capability-Catalog.md)
-9. [doc/plans/README.md](/Users/BofeiChen/AutoDesign/doc/plans/README.md)
-10. [reports/README.md](/Users/BofeiChen/AutoDesign/reports/README.md)
+### 新接手仓库
 
-## 两条主工作流
+1. [README](../README.md)
+2. [AGENT](../AGENT.md)
+3. [Dev AI Workflow](../contributing_ai.md)
+4. [Architecture Governance](Architecture-Folder-Governance.md)
+5. [Roadmap](Roadmap.md)
+
+### 做文档治理或仓库规则调整
+
+1. [Architecture Governance](Architecture-Folder-Governance.md)
+2. [Product Standards](Product-Standards.md)
+3. [Test Standards](Test-Standards.md)
+4. [Plan Docs](plans/README.md)
+5. [Reports](../reports/README.md)
+
+### 做插件、bridge、capability 或 reconstruction
+
+1. [Architecture](Architecture.md)
+2. [Capability Catalog](Capability-Catalog.md)
+3. [Roadmap](Roadmap.md)
+4. 相关 `doc/plans/*`
+5. [plugins/autodesign/README.md](../plugins/autodesign/README.md)
+
+### 做 Runtime AI / Context Pack / action prompt
+
+1. [doc/ai/README.md](ai/README.md)
+2. [doc/ai/runtime/README.md](ai/runtime/README.md)
+3. [doc/ai/runtime/SYSTEM_PROMPT.md](ai/runtime/SYSTEM_PROMPT.md)
+4. 对应 `actions/*` 和 `contracts/*`
+5. [workspace-context-pack-hardening.md](plans/workspace-context-pack-hardening.md)
+
+## 两条正式工作流
 
 ### 1. AI -> Figma
 
 入口：
 
-- 正式插件 [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json)
-- 插件执行器 [main.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/main.ts)
-- 运行时能力 [capability-runner.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)
-- bridge CLI [plugin-bridge-cli.ts](/Users/BofeiChen/AutoDesign/scripts/plugin-bridge-cli.ts)
+- `plugins/autodesign/dist/manifest.json`
+- `plugins/autodesign/src/main.ts`
+- `plugins/autodesign/src/runtime/capability-runner.ts`
+- `scripts/plugin-bridge-cli.ts`
 
-这一侧负责：
+负责：
 
 - 读取 selection
 - 导出 preview
-- inspect subtree / frame
 - 执行 capability 命令
 - reconstruction analyze / apply / render / measure
 
@@ -83,24 +107,38 @@
 
 入口：
 
-- 工作台入口 [App.tsx](/Users/BofeiChen/AutoDesign/src/App.tsx)
-- 本地 API [index.ts](/Users/BofeiChen/AutoDesign/server/index.ts)
-- 上下文构造 [context-pack.ts](/Users/BofeiChen/AutoDesign/shared/context-pack.ts)
+- `src/App.tsx`
+- `src/components/workspace/workspace-shell.tsx`
+- `server/index.ts`
+- `shared/context-pack.ts`
 
-这一侧负责：
+负责：
 
 - 设计源整理
 - component mapping
+- review queue
 - Runtime Context Pack
-- 为 AI 修改前端代码提供更稳定输入
+- 给 AI 提供更稳定的前端改造输入
 
-## 文档边界
+## 文档职责图
 
-- 治理与目录规则：[Architecture-Folder-Governance.md](/Users/BofeiChen/AutoDesign/doc/Architecture-Folder-Governance.md)
-- 产品原则：[Product-Standards.md](/Users/BofeiChen/AutoDesign/doc/Product-Standards.md)
-- 测试与验收：[Test-Standards.md](/Users/BofeiChen/AutoDesign/doc/Test-Standards.md)
-- 当前执行真相：[Roadmap.md](/Users/BofeiChen/AutoDesign/doc/Roadmap.md)
-- 能力目录：[Capability-Catalog.md](/Users/BofeiChen/AutoDesign/doc/Capability-Catalog.md)
-- AI 契约：`doc/ai/`
-- 活跃计划：`doc/plans/`
-- 验收与质量证据：`reports/`
+- [README](../README.md)
+  项目定位、运行入口、阅读入口
+- [AGENT](../AGENT.md)
+  最高优先级项目原则
+- [contributing_ai](../contributing_ai.md)
+  Dev AI 默认执行流程
+- [Architecture Governance](Architecture-Folder-Governance.md)
+  目录职责和文档治理规则
+- [Product Standards](Product-Standards.md)
+  产品默认行为和交付原则
+- [Test Standards](Test-Standards.md)
+  测试层次和验收门槛
+- [Roadmap](Roadmap.md)
+  当前 active work
+- [plans/](plans/README.md)
+  how
+- [reports/](../reports/README.md)
+  evidence
+- [Runtime AI Docs](ai/README.md)
+  Runtime AI 契约入口

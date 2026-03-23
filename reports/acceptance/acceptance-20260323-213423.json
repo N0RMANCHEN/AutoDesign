@@ -1,0 +1,37 @@
+{
+  "kind": "acceptance_report",
+  "timestamp": "20260323-213423",
+  "status": "PASS",
+  "scope": "R4 testing-and-acceptance hardening for CLI guards + capability catalog + expanded unit coverage",
+  "owner": "Codex",
+  "scenario": "Validate that capability-catalog consistency, CLI guard logic, and the expanded unit-test and verify pipeline all pass together.",
+  "commands": [
+    "npm run check:capability-catalog",
+    "npm run check:report-schemas",
+    "npm run test:unit",
+    "npm run typecheck",
+    "npm run verify",
+    "git diff --check"
+  ],
+  "steps": [
+    "Run capability catalog and report schema checks to confirm document contracts match code truth.",
+    "Run unit tests covering CLI guards, capability registry integrity, store lifecycles, analysis contracts, and runtime pure logic.",
+    "Run typecheck and the full verify pipeline to confirm docs, governance, catalog checks, tests, and plugin verification all pass together."
+  ],
+  "observations": [
+    "The full verify pipeline passed end-to-end.",
+    "The unit test suite passed 41 scenarios.",
+    "Capability catalog consistency confirmed 48 implemented capabilities are documented."
+  ],
+  "artifacts": [
+    "reports/acceptance/acceptance-20260323-213423.md",
+    "shared/plugin-cli-guards.test.ts",
+    "shared/plugin-capabilities.test.ts",
+    "scripts/check_capability_catalog_consistency.mjs",
+    "doc/Capability-Catalog.md"
+  ],
+  "follow_up": [
+    "Run live Figma and live bridge acceptance and record the results under reports/acceptance.",
+    "Continue paying down the existing line-limit grace files without weakening governance checks."
+  ]
+}

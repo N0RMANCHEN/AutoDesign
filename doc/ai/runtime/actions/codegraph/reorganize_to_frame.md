@@ -1,5 +1,8 @@
 # Action Prompt - CodeGraph / Reorganize Into Frame
 
+Schema: `doc/ai/runtime/contracts/graphpatch.codegraph.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 你将收到一个 `Context Pack JSON`，其中包含选中节点集合、可选的 `bbox`、以及是否允许连边等约束。
 
 ## 任务

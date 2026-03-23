@@ -1,153 +1,99 @@
-# AutoDesign - Agent Guide (`AGENT.md`)
+# AutoDesign - Agent Guide
 
-> 本文件定义 `AutoDesign` 的项目定位、文档边界、AI 协作原则与实施约束。  
-> 如果与其他 Markdown 冲突，以 `AGENT.md` 为最高优先级。
+> 本文件定义 `AutoDesign` 的最高优先级项目原则。
+> 若与其他 Markdown 冲突，以 `AGENT.md` 为准。
 
 ## 1. 项目身份
 
-**项目名**：AutoDesign  
-**定位**：个人工作流导向的 Figma + React 联调仓库  
-**当前状态**：仓库当前包含一个基于 Vite + React 的工作台、一个独立本地 Node API / bridge，以及一个独立 Figma 插件，用于分别承载 Figma-to-React 与 AI-to-Figma 两条链路。
+`AutoDesign` 是一个围绕设计事实、前端实现验证和 AI 可控写 Figma 的个人联调仓库。
 
-AutoDesign 不是成品 SaaS，也不是随手记录想法的知识库。它是一个用于回答下面问题的工作仓库：
+它当前不承担：
 
-- 设计稿中的结构、状态和交互，如何稳定映射到 React 实现
-- 设计评审、实现评审、联调排查，如何共享同一套上下文
-- AI 在这个流程里能提供哪些可验证、可回滚、可追踪的辅助
+- 成品 SaaS 的多用户和后端业务系统
+- 插件市场产品化包装
+- 无需审阅的全自动生产级代码生成
 
-## 2. 目标边界
+## 2. 非协商边界
 
-AutoDesign 当前关注三类输出：
+### 2.1 两类真相必须分开
 
-- 设计到实现的映射规则
-- React 原型或最小验证实现的约束
-- 面向 Codex / Claude 的 Runtime Prompt 与上下文契约
+- 设计真相：以 Figma 中已经确认的结构、状态、命名、层级为准
+- 实现真相：以仓库中已经落地并可验证的行为为准
 
-以下内容不在本仓库当前主目标内：
+文档和 AI 输出不得把两者混写。
 
-- 生产级业务功能开发
-- 与真实线上服务深度集成
-- 模糊的灵感型文档堆积，不形成可执行规则
+### 2.2 正式写回主链固定
 
-## 3. 事实与计划
+当前仓库里，正式 Figma 写回主链是：
 
-当前仓库事实：
+`Plugin API + localhost bridge`
 
-- 仍保留完整 Markdown 文档体系
-- 已有 Vite + React 前端工作台与独立 Node API
-- 项目数据通过本地 JSON 文件持久化
-- `doc/ai/runtime/` 保存 AI 运行时提示词与契约说明
-- 已有可据实描述的 React 工作台、本地 bridge、独立 Figma 插件和 capability registry
+约束：
 
-计划中的实现只允许写成“计划”或“目标态”，不能伪装成现状。
+- 插件 runtime 才能直接写 Figma
+- workspace 和 server 只能通过 bridge / capability contract 驱动写回
+- MCP 可以辅助读取设计上下文，但不是当前正式写回主链
 
-## 4. 设计真相与实现真相
+### 2.3 本地 bridge 默认已授权
 
-本项目同时存在两类真相：
-
-- **设计真相**：以 Figma 中已经确认的组件结构、交互状态、命名、层级为准
-- **实现真相**：以 React 原型中已经落地并可验证的行为为准
-
-文档必须明确区分两者，避免下面两种常见错误：
-
-- 把设计猜测写成实现事实
-- 把临时实现细节上升为长期设计原则
-
-## 5. AI 的职责
-
-AI 在 AutoDesign 中只承担辅助角色：
-
-- 归纳设计信息
-- 生成结构化建议
-- 输出可审阅的 JSON patch / 文本草案
-- 标注风险、缺口、需要补充的上下文
-
-AI 不能自行拥有隐藏状态，也不能绕过人工确认直接改写“设计事实”。
-
-## 6. 文档分层
-
-- `README.md`：项目总览与入口
-- `contributing_ai.md`：Dev AI 协作流程与交付规则
-- `doc/Architecture-Folder-Governance.md`：最高优先级治理规则、目录职责与文档边界
-- `doc/Product-Standards.md`：产品原则、默认行为与设计质量要求
-- `doc/Test-Standards.md`：测试与验收标准
-- `doc/Roadmap.md`：当前执行真相，只保留 active work
-- `doc/Architecture.md`：当前架构现状、风险与演进约束
-- `doc/Capability-Catalog.md`：插件能力与命令体系
-- `doc/Project-Map.md`：仓库导航与阅读路径
-- `doc/plans/README.md`：计划文档边界
-- `reports/README.md`：报告层边界与证据归档方式
-- `doc/ai/runtime/*`：Runtime AI 提示词与契约
-
-## 7. 非协商原则
-
-### 7.1 先文档，再让实现追上
-
-如果实现方案仍有高风险分歧，先更新文档，不要直接写代码试错。
-
-### 7.2 一次只收敛一个问题
-
-每次改动必须能回答“这次具体解决了什么不确定性”。
-
-### 7.3 事实必须可追溯
-
-文档里的“当前状态”必须能从仓库直接验证；无法验证的内容只能写成假设、计划或建议。
-
-### 7.4 Prompt 也是接口
-
-`doc/ai/runtime/*` 不是随笔。它们是实现 AI 联调能力时要依赖的接口草案，修改时必须考虑上下文格式、输出格式和失败策略。
-
-### 7.5 不制造假完整性
-
-没有实现的目录、脚本、页面、状态机、组件，不要假装已经存在。
-
-### 7.6 正式插件 UI 默认冻结
-
-`plugins/autodesign/src/ui.html` 的可见 UI 默认冻结。
-
-- 没有用户明确要求，不允许修改正式插件 UI 的布局、尺寸、样式、文案或可见交互
-- 稳定性、bridge、执行链、验收链的改造，默认只能放在不可见层完成
-- 如用户明确要求修改 UI，必须同步更新 UI lock 与相关文档
-
-### 7.7 本地 bridge 默认已授权
-
-对本仓库中的 Dev AI，用户已明确授权默认使用本地 bridge：
+对本项目中的 Dev AI，用户已授权默认访问：
 
 - `http://localhost:3001/api/*`
 
-约束如下：
+只要仍是当前仓库、当前本地 bridge、当前 Figma 会话范围，就不要把这件事反复写成“需要再次授权”。
 
-- 该授权只用于当前项目的 Figma 执行链路
-- 默认可用于读取当前 session、selection、预览，以及向当前 Figma 会话发送命令
-- 只要主机、端口、协议和目标范围没有变化，不要再为这条本地 bridge 访问重复询问用户
-- 如果宿主工具仍然要求审批，视为宿主运行时限制，不要把它表述为“用户未授权”
-- 如果未来访问范围超出本地 bridge，或目标变成非本项目 Figma 会话，再单独确认
+### 2.4 正式插件 UI 默认冻结
 
-## 8. AI 代理的工作方式
+`plugins/autodesign/src/ui.html` 的可见 UI 默认冻结。
 
-AI agents 在本仓库中工作时，默认遵循：
+- 没有用户明确要求，不允许修改布局、尺寸、样式、文案或可见交互
+- 如确需修改，必须同步更新 UI lock 与相关文档
 
-1. 先确认当前仓库事实
-2. 再决定是补文档、改规范，还是落地实现
-3. 输出必须区分“已验证”与“未验证”
-4. 任何影响项目定位的变化，都要同步改 `README.md` 或 ADR
-5. 只要任务涉及当前仓库里的 Figma 执行链路，默认以 **Plugin API + 本地 bridge** 为准，不要把 MCP 当成当前主执行面
-6. 如果任务涉及设计读取、截图理解或外部设计上下文，可以使用已配置的 Figma MCP server 辅助读取，但必须明确它不是当前仓库实际写回 Figma 的主链路
-7. 仓库中的 `workspace` 与 `plugin` 必须保持职责隔离，只共享协议和数据模型，不共享隐式运行时状态
-8. 只要任务仍在本项目和 `localhost:3001/api/*` 范围内，默认视为用户已经授权本地 bridge 访问
+### 2.5 Prompt 与 schema 也算接口
 
-## 9. 交付判断标准
+`doc/ai/runtime/*` 不是随笔，而是 Runtime AI 契约层。
 
-一次修改可以视为完成，至少应满足：
+- 输入结构、输出 JSON、失败策略必须与实现和 schema 对齐
+- 未实现的内容只能写成计划态，不得伪装成现状
 
-- 没有残留旧项目名或错误上下文
-- 文档之间引用一致
-- 术语定义前后一致
+## 3. AI 的职责
+
+AI 在本仓库中只承担辅助角色：
+
+- 归纳设计信息
+- 生成结构化建议
+- 输出可审阅的文本、JSON patch 或实施草案
+- 标注风险、缺口和待确认项
+
+AI 不能自行拥有隐藏状态，也不能绕过人工确认直接改写“设计事实”。
+
+## 4. 文档权责
+
+以下文档是正式入口：
+
+- [README](README.md)：项目定位、运行入口、阅读入口
+- [Project Map](doc/Project-Map.md)：仓库导航与阅读路径
+- [Dev AI Workflow](contributing_ai.md)：Dev AI 默认执行流程
+- [Architecture Governance](doc/Architecture-Folder-Governance.md)：目录职责和文档治理
+- [Product Standards](doc/Product-Standards.md)：产品原则和默认行为
+- [Test Standards](doc/Test-Standards.md)：测试和验收门槛
+- [Roadmap](doc/Roadmap.md)：当前 active work
+- [Runtime AI Docs](doc/ai/README.md)：Runtime AI 文档总入口
+
+单一事实来源固定为：
+
+- active work：`doc/Roadmap.md`
+- implementation plan：`doc/plans/*`
+- acceptance / quality / incident evidence：`reports/*`
+- capability truth：`doc/Capability-Catalog.md`
+- architecture truth：`doc/Architecture.md`
+
+## 5. 交付底线
+
+一次改动可以视为完成，至少满足：
+
+- 当前状态与仓库事实一致
+- 文档引用可达，没有残留失效路径
 - 计划态与现状态分界清楚
-- AI 文档里的输入输出契约没有互相冲突
-
-## 10. 与其他文档的关系
-
-- 与 `contributing_ai.md` 冲突时，以本文件为准
-- 设计实现细节如发生变化，应优先更新 `doc/Architecture.md`
-- 如果变化会影响目录职责、文档规则或治理边界，应同步更新 `doc/Architecture-Folder-Governance.md`
+- AI 契约与 schema 不互相冲突
+- 对工作流有意义的变化同步进 `Roadmap`、`plans/`、`reports/` 或 `CHANGELOG.md`

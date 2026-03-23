@@ -1,22 +1,32 @@
-# AutoDesign AI 文档说明
+# AutoDesign AI Docs
 
-本目录保存 AutoDesign 当前仓库的 AI 运行时设计文档。
+本目录是 `AutoDesign` 的 AI 文档总入口，分成两层：
 
-目标不是描述“已经上线的 AI 产品能力”，而是提前定义：
+- Dev AI：仓库协作、文档治理、代码与工作流交付
+- Runtime AI：`Context Pack -> action prompt -> schema -> JSON output` 的运行时契约
 
-- AI 能拿到什么上下文
-- AI 可以执行哪些类型的辅助任务
-- AI 必须输出什么结构
-- 调用方该如何校验、预览和应用结果
+## Dev AI
 
-入口如下：
+Dev AI 相关规则不放在本目录，统一入口为：
 
-- `doc/ai/runtime/README.md`
-- `doc/ai/runtime/SYSTEM_PROMPT.md`
-- `doc/ai/runtime/actions/**`
-- `doc/ai/runtime/contracts/**`
+1. [AGENT.md](../../AGENT.md)
+2. [contributing_ai.md](../../contributing_ai.md)
+3. [doc/Project-Map.md](../Project-Map.md)
 
-这套文档主要服务于两类场景：
+## Runtime AI
 
-- 从 Figma 设计事实出发，给 Codex / Claude 更稳定的前端改造上下文
-- 对设计与实现差异做结构化整理、总结和下一步建议
+Runtime AI 相关文档入口：
+
+1. [runtime/README.md](runtime/README.md)
+2. [runtime/SYSTEM_PROMPT.md](runtime/SYSTEM_PROMPT.md)
+3. `runtime/actions/**`
+4. `runtime/contracts/**`
+
+## 当前状态
+
+当前 Runtime AI 文档描述的是一套正式契约方向，但仓库里的实际接入状态仍是：
+
+- 工作台内已有 “Runtime AI 测试台”
+- action 目前由本地模拟逻辑驱动
+- schema 已存在，可作为 JSON 输出校验基线
+- 真实模型接入仍属于后续演进项，不应在文档中伪装成既成事实

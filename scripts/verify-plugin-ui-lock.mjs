@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDirectory = path.resolve(__dirname, "..");
-const pluginDirectory = path.join(rootDirectory, "plugins/autodesign");
+const pluginDirectory = process.env.AUTODESIGN_PLUGIN_DIR
+  ? path.resolve(process.env.AUTODESIGN_PLUGIN_DIR)
+  : path.join(rootDirectory, "plugins/autodesign");
 const uiSource = "src/ui.html";
 const lockPath = path.join(pluginDirectory, "ui.lock.json");
 

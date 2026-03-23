@@ -1,5 +1,8 @@
 # Action Prompt - Knowledge / Learning Path
 
+Schema: `doc/ai/runtime/contracts/graphpatch.knowledge.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 目标：根据给定目标，为设计理解、组件实现或联调排查生成 3 到 6 步的学习路径或实施路径。
 
 要求：

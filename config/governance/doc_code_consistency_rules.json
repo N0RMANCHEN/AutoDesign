@@ -1,0 +1,134 @@
+{
+  "version": "1.0.0",
+  "requiredDocs": [
+    "README.md",
+    "AGENT.md",
+    "contributing_ai.md",
+    "doc/Architecture-Folder-Governance.md",
+    "doc/Product-Standards.md",
+    "doc/Test-Standards.md",
+    "doc/Roadmap.md",
+    "doc/plans/README.md",
+    "doc/plans/archive/README.md",
+    "reports/README.md"
+  ],
+  "pathReferences": [
+    {
+      "doc": "README.md",
+      "path": "doc/Project-Map.md"
+    },
+    {
+      "doc": "README.md",
+      "path": "doc/ai/README.md"
+    },
+    {
+      "doc": "doc/Architecture-Folder-Governance.md",
+      "path": "config/governance/product_boundary_truth.json"
+    },
+    {
+      "doc": "doc/Architecture-Folder-Governance.md",
+      "path": "doc/plans/archive/README.md"
+    },
+    {
+      "doc": "reports/README.md",
+      "path": "schemas/acceptance-report.schema.json"
+    },
+    {
+      "doc": "reports/README.md",
+      "path": "schemas/quality-report.schema.json"
+    }
+  ],
+  "fieldAssertions": [
+    {
+      "doc": "README.md",
+      "mustContain": "npm run verify"
+    },
+    {
+      "doc": "README.md",
+      "mustContain": "npm run governance:check"
+    },
+    {
+      "doc": "contributing_ai.md",
+      "mustContain": "`npm run governance:check`"
+    },
+    {
+      "doc": "contributing_ai.md",
+      "mustContain": "`npm run check:report-schemas`"
+    },
+    {
+      "doc": "contributing_ai.md",
+      "mustContain": "`npm run check:capability-catalog`"
+    },
+    {
+      "doc": "doc/Product-Standards.md",
+      "mustContain": "Boundary truth source: `config/governance/product_boundary_truth.json`"
+    },
+    {
+      "doc": "doc/Architecture-Folder-Governance.md",
+      "mustContain": "`config/governance/runtime_write_registry.json`"
+    },
+    {
+      "doc": "doc/Test-Standards.md",
+      "mustContain": "`reports/acceptance/*.md + *.json`"
+    },
+    {
+      "doc": "reports/README.md",
+      "mustContain": "`npm run check:report-schemas`"
+    },
+    {
+      "doc": "doc/Capability-Catalog.md",
+      "mustContain": "`components.detach-instance`"
+    },
+    {
+      "doc": "reports/acceptance/README.md",
+      "mustContain": "`acceptance-YYYYMMDD-HHMMSS.md` + `acceptance-YYYYMMDD-HHMMSS.json`"
+    },
+    {
+      "doc": "reports/quality/README.md",
+      "mustContain": "`quality-YYYYMMDD-HHMMSS.md` + `quality-YYYYMMDD-HHMMSS.json`"
+    }
+  ],
+  "roadmapSemantics": {
+    "roadmapDoc": "doc/Roadmap.md",
+    "archiveDoc": "doc/plans/archive/README.md",
+    "allowedStatuses": [
+      "todo",
+      "in_progress",
+      "blocked",
+      "acceptance_pending"
+    ],
+    "requiredMentions": [
+      {
+        "doc": "doc/Roadmap.md",
+        "mustContain": "`support_boundary`"
+      },
+      {
+        "doc": "doc/Roadmap.md",
+        "mustContain": "已完成事项应移出 active list，并在 `doc/plans/archive/`、`CHANGELOG.md` 或 `reports/` 留痕。"
+      },
+      {
+        "doc": "doc/plans/README.md",
+        "mustContain": "archive/README.md"
+      },
+      {
+        "doc": "doc/plans/archive/README.md",
+        "mustContain": "已关闭任务如果再次漂移，必须新开 task，不回写旧 closure。"
+      }
+    ],
+    "forbiddenPatterns": [
+      {
+        "doc": "doc/Roadmap.md",
+        "pattern": "状态：`done`",
+        "description": "Roadmap live queue must not use done status"
+      }
+    ],
+    "reportContractFiles": [
+      "reports/acceptance/TEMPLATE.md",
+      "reports/acceptance/TEMPLATE.json",
+      "reports/quality/TEMPLATE.md",
+      "reports/quality/TEMPLATE.json",
+      "schemas/acceptance-report.schema.json",
+      "schemas/quality-report.schema.json"
+    ]
+  }
+}

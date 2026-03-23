@@ -1,5 +1,8 @@
 # Action Prompt - CodeGraph / Summarize Selection
 
+Schema: `doc/ai/runtime/contracts/graphpatch.codegraph.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 你将收到一个 `Context Pack JSON`，其中包含 `graphKind="codegraph"`，以及选中设计节点、实现节点或联调片段的摘要。
 
 ## 任务

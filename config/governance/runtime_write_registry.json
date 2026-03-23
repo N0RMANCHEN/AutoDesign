@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "figmaApiAllowedGlobs": [
+    "plugins/autodesign/src/*.ts",
+    "plugins/autodesign/src/**/*.ts",
+    "plugins/autodesign-smoke/src/*.ts",
+    "plugins/autodesign-smoke/src/**/*.ts"
+  ],
+  "truthStores": [
+    {
+      "id": "plugin_bridge_snapshot",
+      "path": "data/autodesign-plugin-bridge.json",
+      "allowedWriters": [
+        "server/plugin-bridge-store.ts"
+      ]
+    },
+    {
+      "id": "project_store",
+      "path": "data/autodesign-project.json",
+      "allowedWriters": [
+        "server/storage.ts"
+      ]
+    },
+    {
+      "id": "reconstruction_jobs",
+      "path": "data/autodesign-reconstruction-jobs.json",
+      "allowedWriters": [
+        "server/reconstruction-store.ts"
+      ]
+    }
+  ]
+}

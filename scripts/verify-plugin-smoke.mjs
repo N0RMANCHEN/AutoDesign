@@ -7,7 +7,9 @@ import { composePluginCommandsFromPrompt } from "../shared/plugin-command-compos
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDirectory = path.resolve(__dirname, "..");
-const pluginDistDirectory = path.join(rootDirectory, "plugins/autodesign/dist");
+const pluginDistDirectory = process.env.AUTODESIGN_PLUGIN_DIST_DIR
+  ? path.resolve(process.env.AUTODESIGN_PLUGIN_DIST_DIR)
+  : path.join(rootDirectory, "plugins/autodesign/dist");
 
 function ensure(condition, message) {
   if (!condition) {

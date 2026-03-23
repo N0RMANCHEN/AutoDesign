@@ -148,6 +148,21 @@
 - 工作台和 server 只能通过 bridge / capability contract 驱动插件执行
 - reconstruction apply 必须通过插件 capability 或明确受控的写回路径完成
 
+治理配置与门禁：
+
+- `config/governance/architecture_rules.json`
+  目录、依赖方向、关键入口和文件体量门禁
+- `config/governance/runtime_write_registry.json`
+  Figma API 可触达面和关键 truth store owner
+- `npm run governance:check`
+  执行上述两类治理检查
+
+当前关键持久化真相文件默认只允许 owner 模块写入：
+
+- `data/autodesign-plugin-bridge.json` -> `server/plugin-bridge-store.ts`
+- `data/autodesign-project.json` -> `server/storage.ts`
+- `data/autodesign-reconstruction-jobs.json` -> `server/reconstruction-store.ts`
+
 ## 5. 文档治理规则
 
 ### 5.1 单一事实来源
@@ -157,8 +172,17 @@
 - 架构治理规则：本文档
 - 产品原则：`doc/Product-Standards.md`
 - 测试标准：`doc/Test-Standards.md`
+- Runtime AI 契约：`doc/ai/runtime/*`
+- 支持边界真相：`config/governance/product_boundary_truth.json`
 
 同一类事实不能在多个 Markdown 里并行维护。
+
+以下高优先级规则默认只保留一个正文来源：
+
+- 本地 bridge 默认授权：`AGENT.md`
+- 正式插件 UI 默认冻结：`AGENT.md`
+- `Plugin API + localhost bridge` 是正式写回主链：`AGENT.md`
+- `Roadmap / plans / reports / CHANGELOG` 分工：本文档
 
 ### 5.2 删除优先于并存
 
@@ -227,3 +251,11 @@
 3. 它是否会成为稳定入口，而不是一次性记录
 
 如果回答不清楚，就不应新建文档。
+
+## 9. 模板与检查
+
+- 新计划优先复制 `doc/plans/_template.md`
+- 已关闭计划默认迁入 `doc/plans/archive/`，生命周期说明见 `doc/plans/archive/README.md`
+- 新报告优先复制 `reports/*/TEMPLATE.md`
+- 文档相关改动提交前，默认执行 `npm run verify`
+- 架构边界、Figma 写回面或 truth store 改动提交前，默认执行 `npm run governance:check`

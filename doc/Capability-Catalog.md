@@ -166,6 +166,7 @@ type PluginCommandExecutionResult = {
 | capabilityId | domain | status | payload | 作用 |
 | --- | --- | --- | --- | --- |
 | `selection.refresh` | `selection` | implemented | `{}` | 读取当前 selection，并更新插件会话上下文 |
+| `nodes.inspect-subtree` | `nodes` | implemented | `{ nodeId, maxDepth? }` | 读取目标节点或 Frame 的 subtree，并返回结构化节点清单 |
 | `fills.set-fill` | `fills-strokes-effects` | implemented | `{ hex }` | 把当前 selection 的 fill 改成实体色 |
 | `fills.clear-fill` | `fills-strokes-effects` | implemented | `{}` | 清空当前 selection 的 fill |
 | `strokes.set-stroke` | `fills-strokes-effects` | implemented | `{ hex }` | 把当前 selection 的 stroke 改成实体色 |
@@ -182,14 +183,30 @@ type PluginCommandExecutionResult = {
 | `nodes.duplicate` | `nodes` | implemented | `{ offsetX?, offsetY? }` | 复制当前 selection，并可附带偏移 |
 | `nodes.group` | `nodes` | implemented | `{ name? }` | 将当前 selection 分组成一个 Group |
 | `nodes.frame-selection` | `nodes` | implemented | `{ name?, padding? }` | 用新建 Frame 包裹当前 selection |
+| `layout.configure-frame` | `layout-autolayout` | implemented | `{ layoutMode?, primaryAxisSizingMode?, counterAxisSizingMode?, primaryAxisAlignItems?, counterAxisAlignItems?, itemSpacing?, paddingLeft?, paddingRight?, paddingTop?, paddingBottom?, clipsContent? }` | 配置选中 Frame 的 Auto Layout、padding、spacing 和 clipping |
+| `layout.configure-child` | `layout-autolayout` | implemented | `{ layoutAlign?, layoutGrow?, layoutPositioning? }` | 配置 Auto Layout 子节点的布局规则 |
 | `nodes.create-frame` | `nodes` | implemented | `{ name?, width, height, x?, y?, fillHex?, cornerRadius?, parentNodeId? }` | 创建一个空 Frame |
 | `nodes.create-text` | `nodes` | implemented | `{ name?, content, fontFamily?, fontStyle?, fontSize?, fontWeight?, colorHex?, x?, y?, parentNodeId? }` | 创建一个文本节点 |
+| `nodes.create-rectangle` | `nodes` | implemented | `{ name?, width, height, x?, y?, placement?, gap?, fillHex?, strokeHex?, strokeWeight?, cornerRadius?, opacity?, parentNodeId? }` | 创建一个矩形节点 |
+| `nodes.create-ellipse` | `nodes` | implemented | `{ name?, width, height, x?, y?, fillHex?, strokeHex?, strokeWeight?, opacity?, parentNodeId? }` | 创建一个椭圆节点 |
+| `nodes.create-line` | `nodes` | implemented | `{ name?, width, height?, x?, y?, strokeHex?, strokeWeight?, opacity?, rotation?, parentNodeId? }` | 创建一个线段节点 |
+| `nodes.create-svg` | `nodes` | implemented | `{ name?, svgMarkup, x?, y?, width?, height?, opacity?, parentNodeId? }` | 从 SVG 字符串创建可编辑矢量节点 |
+| `assets.export-node-image` | `assets-images-export` | implemented | `{ format?, constraint?, preferOriginalBytes? }` | 导出节点图像，并可优先使用原始 image-fill 字节 |
+| `reconstruction.apply-raster-reference` | `reconstruction` | implemented | `{ referenceNodeId?, referenceDataUrl?, resultName?, replaceTargetContents?, resizeTargetToReference?, fitMode?, x?, y?, width?, height?, opacity? }` | 以 raster-exact 方式把参考图写入目标 Frame |
 | `nodes.delete` | `nodes` | implemented | `{}` | 删除 `nodeIds` 指定的节点或当前 selection |
+| `nodes.set-clips-content` | `nodes` | implemented | `{ value }` | 切换选中 Frame 类节点的 clips content |
+| `nodes.set-mask` | `nodes` | implemented | `{ value }` | 切换选中节点的 mask 行为 |
 | `text.set-content` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的内容 |
 | `text.set-font-size` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的字号 |
 | `text.set-font-family` | `text` | implemented | `{ family, style? }` | 修改当前 selection 中文本节点的字体族 |
 | `text.set-font-weight` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的字重 |
 | `text.set-text-color` | `text` | implemented | `{ hex }` | 修改当前 selection 中文本节点的颜色 |
+| `text.set-line-height` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的行高 |
+| `text.set-letter-spacing` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的字距 |
+| `text.set-alignment` | `text` | implemented | `{ value }` | 修改当前 selection 中文本节点的水平对齐 |
+| `components.create-component` | `components-instances` | implemented | `{ name? }` | 把当前 selection 转成 reusable component |
+| `components.create-instance` | `components-instances` | implemented | `{ mainComponentNodeId, x?, y?, parentNodeId?, name? }` | 从已有 component 创建 instance |
+| `components.detach-instance` | `components-instances` | implemented | `{}` | 把当前 selection 中的 instance detach 成可编辑图层 |
 | `styles.upsert-text-style` | `styles` | implemented | `{ name, fontFamily, fontStyle?, fontSize, textColorHex? }` | 创建或更新本地文字样式 |
 | `styles.apply-style` | `styles` | implemented | `{ styleType, styleName }` | 把本地 paint / text style 应用到 selection |
 | `styles.detach-style` | `styles` | implemented | `{ styleType }` | 解绑 fill / stroke / text style |
@@ -330,6 +347,7 @@ type PluginCommandExecutionResult = {
 | capabilityId | status | 说明 |
 | --- | --- | --- |
 | `selection.refresh` | implemented | 刷新当前 selection 摘要 |
+| `nodes.inspect-subtree` | implemented | 读取目标节点或 Frame 的 subtree |
 | `selection.read-metadata` | planned | 返回更完整的节点属性摘要 |
 | `selection.export-preview` | planned | 导出当前 selection 预览 |
 | `selection.read-tree` | planned | 读取 selection 内部层级结构 |
@@ -372,6 +390,12 @@ type PluginCommandExecutionResult = {
 | `nodes.frame-selection` | implemented | 用 Frame 包裹 selection |
 | `nodes.create-frame` | implemented | 创建空 Frame |
 | `nodes.create-text` | implemented | 创建文本节点 |
+| `nodes.create-rectangle` | implemented | 创建矩形节点 |
+| `nodes.create-ellipse` | implemented | 创建椭圆节点 |
+| `nodes.create-line` | implemented | 创建线段节点 |
+| `nodes.create-svg` | implemented | 创建 SVG 矢量节点 |
+| `nodes.set-clips-content` | implemented | 设置 clips content |
+| `nodes.set-mask` | implemented | 设置 mask 行为 |
 
 ### 6.5 Styles
 
@@ -423,13 +447,17 @@ type PluginCommandExecutionResult = {
 | `layout.set-spacing` | planned | 改 item spacing |
 | `layout.set-alignment` | planned | 改对齐规则 |
 | `layout.set-sizing` | planned | 改 hug / fill / fixed |
+| `layout.configure-frame` | implemented | 配置 Frame 的 Auto Layout、padding、spacing 和 clipping |
+| `layout.configure-child` | implemented | 配置 Auto Layout 子节点规则 |
 | `layout.set-constraints` | planned | 改 constraints |
 
 ### 6.9 Components / Instances
 
 | capabilityId | status | 说明 |
 | --- | --- | --- |
-| `components.create-component` | planned | 把节点转成 component |
+| `components.create-component` | implemented | 把节点转成 component |
+| `components.create-instance` | implemented | 从 component 创建 instance |
+| `components.detach-instance` | implemented | detach 当前 selection 中的 instance |
 | `components.create-variant-set` | planned | 创建 variant set |
 | `instances.detach` | planned | detach instance |
 | `instances.swap-component` | planned | 替换实例组件 |
@@ -440,6 +468,7 @@ type PluginCommandExecutionResult = {
 
 | capabilityId | status | 说明 |
 | --- | --- | --- |
+| `assets.export-node-image` | implemented | 导出单个节点图像 |
 | `assets.read-image-bytes` | planned | 读取图片资源字节 |
 | `assets.place-image-fill` | planned | 将图片填充到节点 |
 | `export.selection-png` | planned | 导出 PNG |
@@ -574,8 +603,8 @@ type PluginCommandExecutionResult = {
 
 和这份文档直接对应的代码入口：
 
-- [shared/plugin-capabilities.ts](/Users/BofeiChen/AutoDesign/shared/plugin-capabilities.ts)
-- [shared/plugin-contract.ts](/Users/BofeiChen/AutoDesign/shared/plugin-contract.ts)
-- [shared/plugin-bridge.ts](/Users/BofeiChen/AutoDesign/shared/plugin-bridge.ts)
-- [shared/plugin-command-composer.ts](/Users/BofeiChen/AutoDesign/shared/plugin-command-composer.ts)
-- [plugins/autodesign/src/runtime/capability-runner.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)
+- [shared/plugin-capabilities.ts](../shared/plugin-capabilities.ts)
+- [shared/plugin-contract.ts](../shared/plugin-contract.ts)
+- [shared/plugin-bridge.ts](../shared/plugin-bridge.ts)
+- [shared/plugin-command-composer.ts](../shared/plugin-command-composer.ts)
+- [plugins/autodesign/src/runtime/capability-runner.ts](../plugins/autodesign/src/runtime/capability-runner.ts)

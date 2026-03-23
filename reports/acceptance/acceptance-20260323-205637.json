@@ -1,0 +1,39 @@
+{
+  "kind": "acceptance_report",
+  "timestamp": "20260323-205637",
+  "status": "PASS",
+  "scope": "R4 testing-and-acceptance hardening for governance + shared/runtime pure logic",
+  "owner": "Codex",
+  "scenario": "Validate that governance checks, unit-test coverage, and the main verify chain all pass together after the testing hardening work.",
+  "commands": [
+    "npm run check:doc-consistency",
+    "npm run check:runtime-write-surfaces",
+    "npm run governance:check",
+    "npm run test:unit",
+    "npm run typecheck",
+    "npm run verify",
+    "git diff --check"
+  ],
+  "steps": [
+    "Verify document and governance entry points remain aligned.",
+    "Run unit tests for shared targeting, prompt composition, context pack, runtime actions, and reconstruction refine logic.",
+    "Run typecheck and the full verify pipeline to confirm docs, governance, tests, and plugin validation pass together."
+  ],
+  "observations": [
+    "The full verify pipeline passed end-to-end.",
+    "The unit test suite passed 20 scenarios.",
+    "Governance checks still emit line-limit grace advisories for known large files, but they did not block acceptance."
+  ],
+  "artifacts": [
+    "reports/acceptance/acceptance-20260323-205637.md",
+    "shared/plugin-targeting.test.ts",
+    "shared/plugin-command-composer.test.ts",
+    "shared/context-pack.test.ts",
+    "shared/runtime-actions.test.ts",
+    "server/reconstruction-evaluation.test.ts"
+  ],
+  "follow_up": [
+    "Add server-side reconstruction job lifecycle state-flow tests.",
+    "Run separate live Figma and live bridge acceptance and record them under reports/acceptance or reports/quality."
+  ]
+}

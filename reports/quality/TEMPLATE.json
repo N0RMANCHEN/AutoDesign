@@ -1,0 +1,21 @@
+{
+  "kind": "quality_report",
+  "timestamp": "20260101-000000",
+  "scope": "Describe the quality measurement scope.",
+  "owner": "Owner name",
+  "inputs": [
+    "job/case/commit reference"
+  ],
+  "measurements": [
+    "Score or diff summary"
+  ],
+  "findings": [
+    "Primary conclusion"
+  ],
+  "artifacts": [
+    "reports/quality/quality-20260101-000000.md"
+  ],
+  "follow_up": [
+    "Optional next action"
+  ]
+}

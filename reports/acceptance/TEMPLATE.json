@@ -1,0 +1,24 @@
+{
+  "kind": "acceptance_report",
+  "timestamp": "20260101-000000",
+  "status": "PASS",
+  "scope": "Describe the acceptance scope.",
+  "owner": "Owner name",
+  "scenario": "Describe the scenario under validation.",
+  "commands": [
+    "npm run plugin:status"
+  ],
+  "steps": [
+    "Step 1",
+    "Step 2"
+  ],
+  "observations": [
+    "Key observation"
+  ],
+  "artifacts": [
+    "reports/acceptance/acceptance-20260101-000000.md"
+  ],
+  "follow_up": [
+    "Optional next action"
+  ]
+}

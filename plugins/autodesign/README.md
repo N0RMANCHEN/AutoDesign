@@ -49,7 +49,7 @@
 - UI 外观保持既有 selection 列表，不因为稳定性硬化改变可见布局
 - bridge 断连时插件只降级为 `offline`，不能触发插件环境加载失败
 - 构建产物必须通过插件 smoke 校验，并保持 `manifest.ui + figma.showUI(__html__)` 结构
-- 正式插件 UI 受 [ui.lock.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/ui.lock.json) 保护，未获用户明确授权不得修改
+- 正式插件 UI 受 [ui.lock.json](ui.lock.json) 保护，未获用户明确授权不得修改
 
 开发规则：
 
@@ -96,7 +96,7 @@ npm run plugin:preview
 
 导入路径：
 
-- `/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json`
+- `plugins/autodesign/dist/manifest.json`
 
 插件名称：
 
@@ -104,7 +104,7 @@ npm run plugin:preview
 
 手动验收清单：
 
-1. 重新导入 `/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json`
+1. 重新导入 `plugins/autodesign/dist/manifest.json`
 2. 在本地 bridge 未启动时打开插件，确认 UI 正常显示、selection 正常显示、bridge 状态为 `offline`
 3. 启动本地 bridge 后重新打开插件，确认 bridge 状态切到 `online`
 4. 实机执行至少 3 类命令：

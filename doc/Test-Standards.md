@@ -51,6 +51,7 @@
 
 - 单文件、快速、确定
 - 覆盖边界输入和失败路径
+- 默认入口：`npm run test:unit`
 
 ### 2.2 Server / API
 
@@ -110,6 +111,12 @@
 
 手工验收结果必须进入 `reports/acceptance/` 或 `reports/quality/`。
 
+推荐最小合同：
+
+- `reports/acceptance/*.md + *.json`
+- `reports/quality/*.md + *.json`
+- 报告 JSON 默认执行：`npm run check:report-schemas`
+
 ## 3. 命名与结构规则
 
 测试应满足：
@@ -154,6 +161,9 @@
 - 新文档遵守文档树边界
 - `Roadmap`、`plans/`、`reports/`、`CHANGELOG` 职责不混写
 - 关键入口文档无失效路径
+- 非插件运行时不得越界触碰 Figma API
+- 关键 truth store 只能由 owner 模块写入
+- targeting 归一化、CLI guard、capability registry、governance scripts、prompt composition、context pack、runtime action、project storage、plugin bridge store、reconstruction analysis contract 和 reconstruction lifecycle / refine 纯逻辑必须有可重复单测
 
 ## 5. 回归门槛
 
@@ -171,6 +181,11 @@
 - 文档同步
 - 至少一层自动化验证
 - 必要时补手工验收步骤
+
+治理相关改动默认附带：
+
+- `npm run governance:check`
+- shared / reconstruction 纯逻辑改动默认附带：`npm run test:unit`
 
 ## 6. 完成判定
 

@@ -16,6 +16,11 @@
 - 多人协作 SaaS
 - 无需审阅的全自动设计生成器
 
+边界治理：
+
+- Boundary truth source: `config/governance/product_boundary_truth.json`
+- 当前边界摘要：工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。
+
 ## 2. 非协商产品原则
 
 ### 2.1 可编辑优先

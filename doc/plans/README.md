@@ -1,10 +1,10 @@
-# Plan Documents (`doc/plans/`)
+# Plan Documents
 
-> 规则：实现进度以 `doc/Roadmap.md` 为准；本目录只描述 how，不做状态快照，不做历史堆积。
+> 实现进度以 [doc/Roadmap.md](../Roadmap.md) 为准；本目录只描述 how，不做状态快照，不做历史堆积。
 
-## 1. 目录职责
+## 目录职责
 
-`doc/plans/` 只承载活跃主题的计划文档，回答：
+`doc/plans/` 只承载活跃主题的实施方案，回答：
 
 - 范围是什么
 - 为什么现在做
@@ -23,33 +23,55 @@
 - `doc/Roadmap.md`
 - `reports/*`
 
-## 2. 命名规则
+## 创建新计划
 
-文件名直接表达主题，避免模糊标题。
+新增计划前，先在 [Roadmap](../Roadmap.md) 建立 active work，再复制：
 
-推荐：
+- [doc/plans/_template.md](_template.md)
 
-- `documentation-governance-rebuild.md`
-- `workspace-plugin-architecture-hardening.md`
-- `reconstruction-workflow-hardening.md`
+计划文档默认应包含：
 
-不推荐：
+- `Summary`
+- `Scope`
+- `Dependencies`
+- `Entry Conditions`
+- `Exit Conditions`
+- `Risks`
+- `Rollback`
+- `Verification`
 
-- `todo.md`
-- `plan2.md`
-- `notes-final.md`
+## 禁止内容
 
-## 3. 生命周期
+计划文档里不要出现：
+
+- `更新日期`
+- `current_focus`
+- `plugin_runtime`
+- `workspace_runtime`
+- `bridge_runtime`
+- `状态：in_progress / todo / done` 这类执行快照
+
+这些都属于 `Roadmap`。
+
+## 生命周期
 
 - 主题进入 active work 后，先在 `Roadmap` 建项
 - 再在本目录补计划文档
-- 主题完成后，从 `Roadmap` 移出 active list
-- 计划文档如已失去长期入口价值，应删除或转 `reports/archive/`
+- 主题完成后，从 `Roadmap` 移出 active list，并默认转入 `doc/plans/archive/`
+- 已关闭任务如果再次漂移，必须新开 task，不回写旧 closure
 
-## 4. 当前计划
+## Archive
 
-- [documentation-governance-rebuild.md](/Users/BofeiChen/AutoDesign/doc/plans/documentation-governance-rebuild.md)
-- [workspace-plugin-architecture-hardening.md](/Users/BofeiChen/AutoDesign/doc/plans/workspace-plugin-architecture-hardening.md)
-- [reconstruction-workflow-hardening.md](/Users/BofeiChen/AutoDesign/doc/plans/reconstruction-workflow-hardening.md)
-- [testing-and-acceptance-hardening.md](/Users/BofeiChen/AutoDesign/doc/plans/testing-and-acceptance-hardening.md)
-- [workspace-context-pack-hardening.md](/Users/BofeiChen/AutoDesign/doc/plans/workspace-context-pack-hardening.md)
+- 历史 closure 与 archive pointer 统一见 [doc/plans/archive/README.md](archive/README.md)
+
+## 当前计划
+
+- [documentation-governance-rebuild.md](documentation-governance-rebuild.md)
+- [workspace-plugin-architecture-hardening.md](workspace-plugin-architecture-hardening.md)
+- [reconstruction-workflow-hardening.md](reconstruction-workflow-hardening.md)
+- [testing-and-acceptance-hardening.md](testing-and-acceptance-hardening.md)
+- [workspace-context-pack-hardening.md](workspace-context-pack-hardening.md)
+
+## Future / Background
+
+- 当前无独立 future/background plan；如后续新增，必须与 active plans 分区列出

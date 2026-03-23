@@ -2,6 +2,10 @@
 
 本目录用于放重要问题、回归和事故复盘。
 
+创建新报告时，优先复制：
+
+- [reports/incidents/TEMPLATE.md](TEMPLATE.md)
+
 适用内容：
 
 - bridge 断连导致的执行异常

@@ -72,11 +72,11 @@
 
 后续架构整改必须遵守：
 
-- capability 变化先改 [Capability-Catalog.md](/Users/BofeiChen/AutoDesign/doc/Capability-Catalog.md)
-- 目录和职责变化先改 [Architecture-Folder-Governance.md](/Users/BofeiChen/AutoDesign/doc/Architecture-Folder-Governance.md)
-- 产品行为变化先改 [Product-Standards.md](/Users/BofeiChen/AutoDesign/doc/Product-Standards.md)
-- 测试门槛变化先改 [Test-Standards.md](/Users/BofeiChen/AutoDesign/doc/Test-Standards.md)
-- 活跃事项只在 [Roadmap.md](/Users/BofeiChen/AutoDesign/doc/Roadmap.md)
+- capability 变化先改 [Capability-Catalog.md](Capability-Catalog.md)
+- 目录和职责变化先改 [Architecture-Folder-Governance.md](Architecture-Folder-Governance.md)
+- 产品行为变化先改 [Product-Standards.md](Product-Standards.md)
+- 测试门槛变化先改 [Test-Standards.md](Test-Standards.md)
+- 活跃事项只在 [Roadmap.md](Roadmap.md)
 
 ## 6. 当前目录布局
 

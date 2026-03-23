@@ -1,0 +1,98 @@
+{
+  "version": "1.0.0",
+  "requiredDocs": [
+    "README.md",
+    "AGENT.md",
+    "contributing_ai.md",
+    "doc/Architecture-Folder-Governance.md",
+    "doc/Product-Standards.md",
+    "doc/Test-Standards.md",
+    "doc/Roadmap.md",
+    "doc/plans/README.md",
+    "doc/plans/archive/README.md",
+    "reports/README.md",
+    "config/governance/product_boundary_truth.json",
+    "config/governance/doc_code_consistency_rules.json",
+    "config/governance/runtime_write_registry.json"
+  ],
+  "requiredDirs": [
+    "src",
+    "server",
+    "shared",
+    "plugins/autodesign",
+    "plugins/autodesign-smoke",
+    "scripts",
+    "doc",
+    "reports",
+    "config/governance",
+    "schemas"
+  ],
+  "maxFileLines": {
+    "default": 800,
+    "hard": 2000
+  },
+  "lineLimitGrace": {
+    "plugins/autodesign/src/runtime/capability-runner.ts": {
+      "maxAllowed": 3300,
+      "reason": "capability surface is still concentrated here until capability families are split"
+    },
+    "server/index.ts": {
+      "maxAllowed": 2800,
+      "reason": "HTTP routes and orchestration are still consolidated in a single entrypoint"
+    },
+    "server/reconstruction-analysis.ts": {
+      "maxAllowed": 1900,
+      "reason": "reconstruction analysis pipeline has not yet been partitioned"
+    },
+    "server/reconstruction-store.ts": {
+      "maxAllowed": 1300,
+      "reason": "job normalization and persistence are still co-located"
+    },
+    "shared/plugin-command-composer.ts": {
+      "maxAllowed": 950,
+      "reason": "natural language command mapping has not yet been split by capability family"
+    }
+  },
+  "dependencyRules": [
+    {
+      "scope": "shared",
+      "forbid": [
+        "../server/",
+        "../src/",
+        "../plugins/",
+        "../../server/",
+        "../../src/",
+        "../../plugins/"
+      ]
+    },
+    {
+      "scope": "server",
+      "forbid": [
+        "../plugins/",
+        "../src/",
+        "../../plugins/",
+        "../../src/"
+      ]
+    },
+    {
+      "scope": "src",
+      "forbid": [
+        "../server/",
+        "../plugins/",
+        "../../server/",
+        "../../plugins/"
+      ]
+    },
+    {
+      "scope": "plugins",
+      "forbid": [
+        "../server/",
+        "../src/",
+        "../../server/",
+        "../../src/",
+        "../../../server/",
+        "../../../src/"
+      ]
+    }
+  ]
+}

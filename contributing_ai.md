@@ -1,144 +1,98 @@
-# contributing_ai.md
+# Dev AI Workflow
 
 > 本文件约束 Dev AI 如何在 `AutoDesign` 仓库中协作。  
-> 若与 `AGENT.md` 冲突，以 `AGENT.md` 为准。
+> 项目原则以 [AGENT.md](AGENT.md) 为准。
 
-## 0. 适用范围
+## 1. 适用范围
 
-- **Dev AI**：Codex、Claude、Cursor、Copilot 类开发协作 AI
-- **Runtime AI**：未来产品内用于设计摘要、联调辅助的运行时 AI，相关规范见 `doc/ai/runtime/`
+- Dev AI：Codex、Claude、Cursor、Copilot 这类仓库协作 AI
+- Runtime AI：产品内的 `Context Pack -> action -> JSON output` 运行时助手，相关规范见 [doc/ai/README.md](doc/ai/README.md)
 
 本文件只约束前者。
 
-## 1. 默认交付协议
+## 2. 默认执行流程
 
-任何任务默认按以下结构执行：
+任何任务默认按下面顺序推进：
 
-1. 明确目标：要收敛什么问题
-2. 定义验收：什么结果算完成
-3. 先核对仓库事实：目录、文档、命名、现状
-4. 再实施最小改动
-5. 做验证：至少检查引用、术语、残留旧内容
-6. 说明已验证与未验证项
+1. 明确这次要收敛的问题和完成标准。
+2. 先核对仓库事实，再决定改文档、改代码，还是两者都改。
+3. 只做与当前目标直接相关的最小改动。
+4. 把变化同步到正确的权责文档，不制造第二份事实来源。
+5. 做验证，并区分 `VERIFIED` 与 `NOT VERIFIED`。
+6. 对用户或工作流有意义的变化更新 `CHANGELOG.md`。
 
-## 2. 开始工作前要读什么
+## 3. 开始工作前最少阅读集
 
-1. `AGENT.md`
-2. `contributing_ai.md`
-3. `README.md`
-4. `doc/Architecture-Folder-Governance.md`
-5. `doc/Product-Standards.md`
-6. `doc/Test-Standards.md`
-7. `doc/Roadmap.md`
-8. 本次任务直接相关的 `doc/plans/*`、`reports/*` 与专题文档
+所有任务默认先看：
 
-如果任务涉及 AI Prompt，额外阅读 `doc/ai/runtime/README.md` 与对应 action 文档。
+1. [AGENT.md](AGENT.md)
+2. [README.md](README.md)
+3. [doc/Project-Map.md](doc/Project-Map.md)
+4. [doc/Architecture-Folder-Governance.md](doc/Architecture-Folder-Governance.md)
+5. [doc/Product-Standards.md](doc/Product-Standards.md)
+6. [doc/Test-Standards.md](doc/Test-Standards.md)
+7. [doc/Roadmap.md](doc/Roadmap.md)
 
-如果任务涉及 capability、reconstruction、插件写回或测试验收，不允许跳过第 4-7 步。
+再补读与任务直接相关的计划、报告、架构或 AI 文档。
 
-## 3. 非协商规则
+## 4. 改动时该更新哪份文档
 
-### 3.1 先查事实，不先脑补
+- 项目定位、入口导航变化：更新 `README.md` 或 `doc/Project-Map.md`
+- 最高优先级原则变化：更新 `AGENT.md`
+- Dev AI 默认流程变化：更新 `contributing_ai.md`
+- 目录职责、治理边界变化：更新 `doc/Architecture-Folder-Governance.md`
+- 产品默认行为变化：更新 `doc/Product-Standards.md`
+- 测试门槛变化：更新 `doc/Test-Standards.md`
+- 当前 active work 变化：更新 `doc/Roadmap.md`
+- 实施方案变化：更新 `doc/plans/*`
+- 验收、质量、事故证据：更新 `reports/*`
+- capability 或协议变化：更新 `doc/Capability-Catalog.md`
+- Runtime AI action、schema、系统 prompt：更新 `doc/ai/runtime/*`
 
-没有目录、没有代码、没有脚本，就不能写成“已有能力”。
+## 5. 文档任务最低验证
 
-### 3.2 一次只解决一个清晰问题
+文档改动至少完成以下检查：
 
-即使是大范围改写，也要围绕一个明确目标收敛，例如“统一项目定位”或“修复 AI Prompt 契约”。
-
-### 3.3 不偷偷改变项目语义
-
-如果修改会改变项目定位、接口边界或 AI 输出格式，必须同步更新 `README.md`、`AGENT.md` 或 ADR。
-
-### 3.4 不泄露无关信息
-
-示例、错误信息、诊断说明中不要加入绝对路径、私密 token、无关业务数据。
-
-### 3.5 正式插件 UI 没有显式授权不得改
-
-- `plugins/autodesign/src/ui.html` 属于冻结面
-- 用户没有明确提出“修改插件 UI”时，不能改它的布局、尺寸、样式、文案或可见交互
-- 如果用户明确要求改 UI，必须同步更新 `plugins/autodesign/ui.lock.json`
-
-### 3.6 本地 bridge 默认不再重复询问
-
-- 对本项目中的 Dev AI，用户已明确授权默认访问 `http://localhost:3001/api/*`
-- 该授权适用于当前仓库里的 Figma bridge 读取与写回链路
-- 只要仍是当前项目、当前本地 bridge、当前 Figma 会话范围，就不要再为 localhost bridge 访问重复询问
-- 如果宿主工具仍然弹审批，属于工具运行时限制，不要误写成“用户未授权”
-- 如果访问目标超出 `localhost:3001/api/*` 或超出当前项目范围，再单独确认
-
-## 4. 文档任务的最低验证
-
-文档修改至少完成以下检查：
-
-- 文件名和文内引用一致
-- 旧项目名、旧路径、旧假设被清理
-- 标题层级合理，无明显断层
+- 内部链接可达
+- 不保留机器绑定绝对路径
 - “当前状态”与仓库事实一致
-- “计划”与“现状”没有混写
+- `Roadmap / plans / reports / CHANGELOG` 职责不混写
+- Runtime AI action 文档与 schema 仍对得上
 
 推荐命令：
 
 ```bash
-rg -n "AutoDesign|autodesign|Project-Map|Capability-Catalog" -g '*.md'
-find . -type f -name '*.md' | sort
+npm run verify:docs
 ```
 
-## 5. 代码任务的最低验证
+## 6. 代码或工作流任务最低验证
 
-当前仓库已经有 React/Vite 工作台、本地 Node API / bridge 和独立 Figma 插件。根据改动范围选择验证：
+按改动范围选择最小验证：
 
-- 纯文档：引用检查 + 人工抽查
-- Prompt / JSON 契约：格式检查 + 关联文档抽查
-- React 原型 / API：至少 `npm run build` 或最小 smoke test
-- 联调脚本 / 插件 bridge：至少执行一次示例输入验证
-- 正式插件 UI：至少 `npm run verify:plugin-ui-lock`
+- 纯文档：`npm run verify:docs`
+- Prompt / JSON contract：`npm run verify:docs` + 关联文件人工抽查
+- acceptance / quality report JSON：`npm run check:report-schemas`
+- capability registry / catalog：`npm run check:capability-catalog`
+- React / server：`npm run typecheck`
+- shared targeting / reconstruction 纯逻辑：`npm run test:unit`
+- 架构边界 / bridge truth store / 插件写回面：`npm run governance:check`
+- 插件 / bridge：`npm run verify:plugins`
 
-如果做不到，必须明确写 `NOT VERIFIED` 并说明原因。
-
-## 6. 变更影响检查
-
-当改动触及以下区域时，要同步检查：
-
-- `README.md`：项目定位、入口导航是否变化
-- `AGENT.md`：是否影响总原则
-- `doc/Product-Standards.md`：是否影响默认产品行为、设计质量或交付优先级
-- `doc/Test-Standards.md`：是否影响测试门槛或验收方式
-- `doc/Roadmap.md`：是否需要新增、关闭或改写 active work
-- `doc/plans/*`：active work 是否需要对应计划或计划是否已过期
-- `reports/*`：是否需要新增验收或质量证据
-- `doc/Architecture.md`：方案边界与实施路径是否变化
-- `doc/Architecture-Folder-Governance.md`：目录职责与文档治理是否变化
-- `doc/ai/runtime/*`：输入输出契约是否仍自洽
+如果做不到，必须明确写 `NOT VERIFIED` 和原因。
 
 ## 7. 输出要求
 
-- 对简单任务：直接说明改了什么、怎么验证的
-- 对大任务：说明主要变化、验证结果、未验证风险
-- 不输出大段无用复述
 - 不把猜测说成事实
+- 明确说明改了什么、怎么验证的、哪些仍未验证
+- 不重复复述大段仓库背景
+- 发现文档漂移时，优先把事实收口到唯一来源，再修引用
 
-## 8. 文档写作约定
+## 8. 完成定义
 
-- 中文为主，术语首次出现可带英文
-- 标题要能直接说明作用
-- 尽量使用短段落和清晰列表
-- 避免把规范写成过度抽象的口号
-
-## 9. 完成定义
-
-一次文档交付可以视为完成，至少满足：
+一次 Dev AI 交付可视为完成，至少满足：
 
 - 与 `AGENT.md` 不冲突
-- 用户要求涉及的文件都已覆盖
-- 关键引用已修复
-- 残留旧语义已清理
-- 验证结果已明确说明
-
-一次代码或工作流交付额外还应满足：
-
-- 如果属于 active work，`Roadmap` 已更新
-- 如需计划，`doc/plans/*` 已补齐
-- 如有验收或质量证据，已落到 `reports/*`
-- 对用户或工作流有意义的变化已更新 `CHANGELOG.md`
+- 用户要求涉及的文档或实现已覆盖
+- 关键入口和引用已修复
+- 变更落到了正确的 `Roadmap / plans / reports / CHANGELOG`
+- 验证结果已明确写出

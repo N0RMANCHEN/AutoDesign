@@ -1,5 +1,8 @@
 # Action Prompt - Knowledge / Propose Branches
 
+Schema: `doc/ai/runtime/contracts/graphpatch.knowledge.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 目标：围绕当前知识节点提出 2 到 4 个后续分支，用于拆解设计研究、实现验证或联调排查。
 
 要求：

@@ -7,19 +7,23 @@ import esbuild from "esbuild";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDirectory = path.resolve(__dirname, "..");
+const rootDirectory = process.env.AUTODESIGN_BUILD_ROOT
+  ? path.resolve(process.env.AUTODESIGN_BUILD_ROOT)
+  : path.resolve(__dirname, "..");
 
-const pluginPackages = [
-  {
-    directory: "plugins/autodesign-smoke",
-    entryFile: "src/main.ts",
-  },
-  {
-    directory: "plugins/autodesign",
-    entryFile: "src/main.ts",
-    uiFile: "src/ui.html",
-  },
-];
+const pluginPackages = process.env.AUTODESIGN_PLUGIN_PACKAGES_JSON
+  ? JSON.parse(process.env.AUTODESIGN_PLUGIN_PACKAGES_JSON)
+  : [
+      {
+        directory: "plugins/autodesign-smoke",
+        entryFile: "src/main.ts",
+      },
+      {
+        directory: "plugins/autodesign",
+        entryFile: "src/main.ts",
+        uiFile: "src/ui.html",
+      },
+    ];
 
 async function fileExists(targetPath) {
   try {

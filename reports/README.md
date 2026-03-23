@@ -5,13 +5,34 @@
 ## 目录职责
 
 - `reports/acceptance/`
-  手工验收和发布前检查
+  人工验收和发布前检查
 - `reports/quality/`
   质量评分、diff 结果、阶段评估
 - `reports/incidents/`
-  重要回归、事故和复盘
+  回归事故、重要问题复盘
 - `reports/archive/`
-  失去活跃价值但仍需保留的历史报告
+  历史报告归档
+
+## 创建新报告
+
+新增报告时，优先复制对应模板：
+
+- [reports/acceptance/TEMPLATE.md](acceptance/TEMPLATE.md)
+- [reports/acceptance/TEMPLATE.json](acceptance/TEMPLATE.json)
+- [reports/quality/TEMPLATE.md](quality/TEMPLATE.md)
+- [reports/quality/TEMPLATE.json](quality/TEMPLATE.json)
+- [reports/incidents/TEMPLATE.md](incidents/TEMPLATE.md)
+
+报告合同：
+
+- `reports/acceptance/*.md + *.json`
+  JSON 结构遵守 [schemas/acceptance-report.schema.json](../schemas/acceptance-report.schema.json)
+- `reports/quality/*.md + *.json`
+  JSON 结构遵守 [schemas/quality-report.schema.json](../schemas/quality-report.schema.json)
+
+报告 JSON 提交前，默认执行：
+
+- `npm run check:report-schemas`
 
 ## 写作规则
 

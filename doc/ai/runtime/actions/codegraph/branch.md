@@ -1,5 +1,8 @@
 # Action Prompt - CodeGraph / Branch Next Steps
 
+Schema: `doc/ai/runtime/contracts/graphpatch.codegraph.schema.json`
+当前接入状态：工作台本地模拟 action，可替换为真实模型调用
+
 你将收到一个 `Context Pack JSON`，其中包含当前选中的设计或实现节点摘要，以及可选的 `primaryId`、位置信息和约束字段。
 
 ## 任务

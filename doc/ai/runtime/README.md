@@ -1,23 +1,39 @@
-# Runtime AI（AutoDesign 设计联调助手）
+# Runtime AI
 
-## 作用
+Runtime AI 用于 `AutoDesign` 的设计联调场景，负责消费结构化 `Context Pack`，输出严格、可校验、可预览的 JSON 结果。
 
-Runtime AI 用于 AutoDesign 的设计联调场景，负责消费一份结构化 `Context Pack`，然后返回可审阅的结构化结果。
+## 当前接入状态
 
-它适合处理的任务包括：
+当前仓库里的真实状态是：
 
-- 摘要选中的设计或实现信息
-- 生成下一步分支
-- 把零散节点整理成更清晰的结构
-- 生成学习或实施路径
+- 工作台包含 “Runtime AI 测试台”
+- `Context Pack` 可在工作台生成
+- action 当前由本地模拟逻辑驱动，代码入口在 `shared/runtime-actions.ts`
+- `SYSTEM_PROMPT.md`、`actions/*`、`contracts/*` 已形成契约草案
+- 真实模型接入仍未成为默认主链
 
-## 使用方式
+因此，这里的文档必须明确区分：
 
-1. 选择一个 action prompt，例如 `actions/codegraph/summarize.md`
-2. 准备对应的 `Context Pack JSON`
-3. 将 `SYSTEM_PROMPT.md` 作为 system prompt
-4. 要求模型返回严格 JSON
-5. 在应用结果前先做校验与人工预览
+- `implemented now`
+  本地模拟 action、现有 schema、工作台测试台
+- `planned`
+  真实模型调用、正式服务编排、更严格的输出校验链
+
+## 标准调用流程
+
+1. 选择一个 action prompt
+2. 生成对应的 `Context Pack JSON`
+3. 使用 [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) 作为 runtime system prompt
+4. 要求模型返回 JSON only
+5. 按对应 schema 校验输出
+6. 人工预览后再应用
+
+## Action 与 Schema
+
+| Action Domain | Actions | Schema |
+| --- | --- | --- |
+| `codegraph` | `summarize` / `branch` / `reorganize_to_frame` | `contracts/graphpatch.codegraph.schema.json` |
+| `knowledge` | `summarize` / `branch` / `learning_path` | `contracts/graphpatch.knowledge.schema.json` |
 
 ## 输入要求
 
@@ -25,19 +41,21 @@ Runtime AI 用于 AutoDesign 的设计联调场景，负责消费一份结构化
 
 - 当前任务类型
 - 选中对象及其摘要
-- 关键位置或层级信息
-- 约束项，例如 `maxNewNodes`
-- 缺省时不允许模型自行猜测的字段
+- `primaryId` 或其他主目标标识
+- 位置信息、层级信息或其他足以执行 action 的关键字段
+- 约束项，例如 `maxNewNodes`、`allowDelete`、`allowEdges`
+
+缺少关键字段时，Runtime AI 不得猜测。
 
 ## 输出要求
 
 - 输出必须是 JSON only
-- 如果上下文不足，应在 `questions` 中明确请求补充
-- 输出中的建议、节点、边、布局应尽量稳定和可重复
-- 任何会影响结构的动作都应遵守最小变更原则
+- 字段结构必须符合对应 schema
+- 如果上下文不足，必须在 `questions` 中明确请求补充
+- 任何结构性建议都应遵守最小变更原则
 
-## 注意事项
+## 文档维护规则
 
-- Runtime AI 是辅助工具，不是事实来源
-- 设计结论与实现结论都需要人工确认
-- Prompt 与 `contracts/*.json` 后续必须继续对齐，否则文档会失效
+- 新增 action 时，必须同时新增或复用对应 schema
+- action 文档必须写明 `Schema` 和 `当前接入状态`
+- 如果真实模型接入改变了当前行为，必须同步更新这里、`SYSTEM_PROMPT.md` 和相关计划文档
