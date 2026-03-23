@@ -117,6 +117,7 @@
 - `reports/quality/*.md + *.json`
 - 报告 JSON 默认执行：`npm run check:report-schemas`
 - live 验收脚手架默认入口：`npm run acceptance:new`
+- live 验收预检入口：`npm run acceptance:preflight`
 
 ## 3. 命名与结构规则
 

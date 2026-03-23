@@ -13,6 +13,7 @@
     "build:plugins": "node scripts/build-figma-plugins.mjs",
     "verify": "node scripts/verify.mjs",
     "acceptance:new": "node scripts/create-acceptance-report.mjs",
+    "acceptance:preflight": "node scripts/create-acceptance-preflight.mjs",
     "verify:docs": "node scripts/verify-docs.mjs",
     "test:unit": "node --test --import tsx server/*.test.ts shared/*.test.ts scripts/*.test.ts",
     "check:product-boundary": "node scripts/check_product_boundary_truth.mjs",

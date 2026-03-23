@@ -36,6 +36,7 @@
 - 扩展 [scripts/plugin-bridge-cli.test.ts](scripts/plugin-bridge-cli.test.ts) 对 `plugin:status`、`plugin:send`、`plugin:preview`、`plugin:inspect`、`plugin:reconstruct` 的 fixture 化覆盖，补齐 mutating queue、只读命令免 `--node-ids`、preview artifact 导出、preview 空选择拒绝、frame inspect 预览落盘、inspect capability 拒绝、reconstruction job 列表输出、hybrid / raster-exact 创建分支 workflow hint、`--context-pack` artifact 落盘合同、`--submit-analysis` 输入校验与回写、`--review-font` / `--review-asset` / `--approve-plan` / `--request-changes` 审核推进分支，以及 `--apply` / `--clear` / `--render` / `--measure` / `--refine` / `--iterate` / `--loop` 的执行闭环输出
 - 新增 [server/api-routes.test.ts](server/api-routes.test.ts)，用临时端口拉起本地 API，覆盖 plugin session 注册、reconstruction job create/list/get、`context-pack` 构建、`submit-analysis` 参数校验和 404 route，开始把验证从 CLI fixture 扩展到真实 HTTP route 层
 - 新增 [scripts/create-acceptance-report.mjs](scripts/create-acceptance-report.mjs) 和 [scripts/create-acceptance-report.test.ts](scripts/create-acceptance-report.test.ts)，提供 `npm run acceptance:new` 脚手架，能直接生成 live bridge / reconstruction / plugin smoke 的验收 `.md + .json` 报告骨架
+- 新增 [scripts/create-acceptance-preflight.mjs](scripts/create-acceptance-preflight.mjs) 和 [scripts/create-acceptance-preflight.test.ts](scripts/create-acceptance-preflight.test.ts)，提供 `npm run acceptance:preflight`，能在 live 验收前先落盘 bridge snapshot、selection summary 和 preview artifact
 
 ### Changed
 

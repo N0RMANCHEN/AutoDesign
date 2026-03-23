@@ -10,6 +10,7 @@
 更推荐的入口：
 
 - `npm run acceptance:new`
+- `npm run acceptance:preflight`
 - `npm run acceptance:new -- --scenario live-figma-bridge --owner <name>`
 - `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
 
@@ -35,6 +36,16 @@ JSON 结构遵守：
   需要人工确认 job create/context-pack/review/apply/render/measure 的 live 流程
 - `plugin-smoke`
   需要人工确认插件能启动、能看到 selection、能导出 preview
+
+live 验收前建议先执行：
+
+- `npm run acceptance:preflight`
+
+它会在 `reports/acceptance/artifacts/<timestamp>/` 下写入：
+
+- `plugin-bridge-snapshot.json`
+- `preflight-summary.txt`
+- 当前 selection 可导出的 preview PNG
 
 不适用内容：
 

@@ -27,6 +27,7 @@
 
 - `npm run acceptance:new`
 - `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
+- `npm run acceptance:preflight`
 
 报告合同：
 
