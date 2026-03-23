@@ -765,6 +765,103 @@ test("plugin_bridge_cli reconstruct --context-pack writes pack and preview artif
   });
 });
 
+test("plugin_bridge_cli reconstruct --submit-analysis rejects missing analysis input", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--submit-analysis"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /--submit-analysis 需要 --analysis-file 或 --analysis-json/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --submit-analysis rejects mixed file and inline analysis input", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const analysisPath = path.join(fixtureDir, "analysis.json");
+    await writeFile(analysisPath, JSON.stringify({ analysis: { surfaces: [] } }, null, 2), "utf8");
+
+    await assert.rejects(
+      () =>
+        runCli(
+          [
+            "reconstruct",
+            "--job",
+            "job-hybrid",
+            "--submit-analysis",
+            "--analysis-file",
+            analysisPath,
+            "--analysis-json",
+            "{\"analysis\":{\"surfaces\":[]}}",
+          ],
+          fixtureDir,
+        ),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /只能使用一种输入方式：--analysis-file 或 --analysis-json/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --submit-analysis accepts inline JSON and prints the updated job", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__submit-analysis.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        analysisVersion: "codex-v1",
+        analysisProvider: "codex-assisted",
+        approvalState: "pending-review",
+        currentStageId: "plan-rebuild",
+        input: {
+          targetSessionId: "session_1",
+          targetNodeId: "target-1",
+          referenceNodeId: "reference-1",
+          goal: "pixel-match",
+          strategy: "hybrid-reconstruction",
+          maxIterations: 4,
+          allowOutpainting: true,
+        },
+        warnings: ["analysis submitted"],
+        rebuildPlan: {
+          previewOnly: true,
+          summary: ["Use vector rebuild"],
+          ops: [],
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--job",
+        "job-hybrid",
+        "--submit-analysis",
+        "--analysis-json",
+        JSON.stringify({
+          analysisVersion: "codex-v1",
+          analysisProvider: "codex-assisted",
+          analysis: {
+            semanticNodes: [],
+          },
+          warnings: ["analysis submitted"],
+        }),
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /approvalState: pending-review/);
+    assert.match(stdout, /analysisVersion: codex-v1/);
+    assert.match(stdout, /analysisProvider: codex-assisted/);
+    assert.match(stdout, /current stage: plan-rebuild/);
+    assert.match(stdout, /warnings:\n- analysis submitted/);
+    assert.match(stdout, /rebuildPlan:\n- Use vector rebuild/);
+  });
+});
+
 test("plugin_bridge_cli rejects unsupported modes with a usage message", async () => {
   let failure: any = null;
   try {
