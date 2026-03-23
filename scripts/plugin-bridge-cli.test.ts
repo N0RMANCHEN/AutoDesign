@@ -862,6 +862,90 @@ test("plugin_bridge_cli reconstruct --submit-analysis accepts inline JSON and pr
   });
 });
 
+test("plugin_bridge_cli reconstruct --review-font rejects missing font review arguments", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--review-font"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /--review-font 需要 --text-candidate 和 --font/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --review-font accepts a reviewer choice and prints approved fonts", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__review__font.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        approvalState: "pending-review",
+        currentStageId: "match-fonts",
+        approvedFontChoices: [
+          {
+            textCandidateId: "text-1",
+            fontFamily: "Inter",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--job",
+        "job-hybrid",
+        "--review-font",
+        "--text-candidate",
+        "text-1",
+        "--font",
+        "Inter",
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /current stage: match-fonts/);
+    assert.match(stdout, /approvedFontChoices:\n- text-1: Inter/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --approve-plan accepts approval notes and prints the approved state", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__review__approve-plan.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        approvalState: "approved",
+        currentStageId: "apply-rebuild",
+        rebuildPlan: {
+          previewOnly: false,
+          summary: ["Plan approved"],
+          ops: [],
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--job",
+        "job-hybrid",
+        "--approve-plan",
+        "--note",
+        "Looks good",
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /approvalState: approved/);
+    assert.match(stdout, /current stage: apply-rebuild/);
+    assert.match(stdout, /rebuildPlan:\n- Plan approved/);
+  });
+});
+
 test("plugin_bridge_cli rejects unsupported modes with a usage message", async () => {
   let failure: any = null;
   try {
