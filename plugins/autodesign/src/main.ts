@@ -13,7 +13,7 @@ import { currentSelectionUiPayload } from "./runtime/selection-context.js";
 const PLUGIN_LABEL = "AutoDesign";
 const PLUGIN_VERSION = "0.2.3";
 const BRIDGE_URL = "http://localhost:3001/api/plugin-bridge";
-const UI_WIDTH = 252;
+const UI_WIDTH = 244;
 const UI_HEIGHT = 116;
 const POLL_INTERVAL_MS = 1500;
 const HEARTBEAT_INTERVAL_MS = 5000;

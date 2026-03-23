@@ -6,14 +6,14 @@
     <style>
       :root {
         color-scheme: light dark;
-        --frame-width: 252px;
+        --frame-width: 244px;
         --frame-height: 116px;
         --selection-shell-size: 40px;
         --selection-shell-inset: 4px;
         --selection-shell-radius: 14px;
         --selection-thumb-size: calc(var(--selection-shell-size) - (var(--selection-shell-inset) * 2));
         --selection-thumb-radius: calc(var(--selection-shell-radius) - var(--selection-shell-inset) - 2px);
-        --selection-row-gap: 8px;
+        --selection-row-gap: 6px;
         --bg: var(--figma-color-bg, #ffffff);
         --surface: var(--figma-color-bg, #ffffff);
         --surface-container: var(--figma-color-bg, #ffffff);
@@ -78,7 +78,7 @@
         align-items: center;
         height: 48px;
         padding: 4px 8px 4px 4px;
-        margin-left: 9px;
+        margin-left: 1px;
         margin-right: -2px;
         border-radius: var(--selection-shell-radius);
         background: var(--selection-fill);
@@ -94,8 +94,7 @@
       .selection-thumb-shell {
         width: var(--selection-shell-size);
         height: var(--selection-shell-size);
-        padding: var(--selection-shell-inset) calc(var(--selection-shell-inset) - 2px) var(--selection-shell-inset)
-          calc(var(--selection-shell-inset) + 2px);
+        padding: var(--selection-shell-inset);
         border-radius: var(--selection-shell-radius);
         background: transparent;
         overflow: hidden;
