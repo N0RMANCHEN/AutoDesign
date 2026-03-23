@@ -288,6 +288,46 @@ test("plugin_bridge_cli preview exports selection previews into the requested ou
   });
 });
 
+test("plugin_bridge_cli preview rejects selections that do not contain exportable previews", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [],
+          selection: [
+            {
+              id: "1:2",
+              name: "Plain Frame",
+              type: "FRAME",
+              fills: [],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+
+    await assert.rejects(
+      () => runCli(["preview"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /当前 selection 没有可导出的预览/);
+        return true;
+      },
+    );
+  });
+});
+
 test("plugin_bridge_cli inspect exports subtree preview artifacts for a frame inspection request", async () => {
   await withFixtureDir(async (fixtureDir) => {
     const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-plugin-inspect-out-"));
@@ -382,6 +422,38 @@ test("plugin_bridge_cli inspect exports subtree preview artifacts for a frame in
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
+  });
+});
+
+test("plugin_bridge_cli inspect rejects frame inspection when the runtime lacks inspect-subtree capability", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [],
+          selection: [],
+        },
+      ],
+      commands: [],
+    });
+
+    await assert.rejects(
+      () => runCli(["inspect", "--frame-node-id", "9:9"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /还不支持 nodes\.inspect-subtree/);
+        return true;
+      },
+    );
   });
 });
 
