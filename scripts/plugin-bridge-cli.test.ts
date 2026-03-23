@@ -19,6 +19,76 @@ function pngDataUrl(contents: string) {
   return `data:image/png;base64,${Buffer.from(contents, "utf8").toString("base64")}`;
 }
 
+function createReconstructionJobFixture(
+  strategy: "vector-reconstruction" | "hybrid-reconstruction" | "raster-exact" | "structural-preview",
+  overrides?: Record<string, unknown>,
+) {
+  return {
+    id: `job-${strategy}`,
+    analysisVersion: "test",
+    analysisProvider: "heuristic-local",
+    input: {
+      targetSessionId: "session_1",
+      targetNodeId: "target-1",
+      referenceNodeId: "reference-1",
+      goal: "pixel-match",
+      strategy,
+      maxIterations: 4,
+      allowOutpainting: strategy === "hybrid-reconstruction",
+    },
+    status: "ready",
+    applyStatus: "not_applied",
+    loopStatus: "idle",
+    stopReason: null,
+    approvalState: "not-reviewed",
+    currentStageId: "extract-reference",
+    createdAt: "2026-03-23T00:00:00.000Z",
+    updatedAt: "2026-03-23T00:00:00.000Z",
+    completedAt: null,
+    lastAppliedAt: null,
+    diffScore: null,
+    bestDiffScore: null,
+    lastImprovement: null,
+    stagnationCount: 0,
+    warnings: ["existing warning"],
+    targetNode: {
+      id: "target-1",
+      name: "Target Frame",
+      type: "FRAME",
+      fillable: true,
+      fills: [],
+      fillStyleId: null,
+      width: 160,
+      height: 100,
+    },
+    referenceNode: {
+      id: "reference-1",
+      name: "Reference Frame",
+      type: "FRAME",
+      fillable: true,
+      fills: [],
+      fillStyleId: null,
+      width: 160,
+      height: 100,
+    },
+    referenceRaster: null,
+    analysis: null,
+    fontMatches: [],
+    rebuildPlan: null,
+    reviewFlags: [],
+    approvedFontChoices: [],
+    approvedAssetChoices: [],
+    renderedPreview: null,
+    diffMetrics: null,
+    structureReport: null,
+    refineSuggestions: [],
+    iterationCount: 0,
+    appliedNodeIds: [],
+    stages: [],
+    ...overrides,
+  };
+}
+
 async function withFixtureDir<T>(run: (fixtureDir: string) => Promise<T>) {
   const fixtureDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-plugin-cli-test-"));
   try {
@@ -492,6 +562,133 @@ test("plugin_bridge_cli reconstruct --list prints summary lines for existing job
     const { stdout } = await runCli(["reconstruct", "--list"], fixtureDir);
     assert.match(stdout, /job_1 \| analysis_ready \| Target Frame <= Reference Screen \| analyze/);
     assert.match(stdout, /job_2 \| refine_pending \| Detail Card <= Reference Card \| measure/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct creates a hybrid job and prints the expected next-step workflow", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [],
+          selection: [],
+        },
+        {
+          id: "session_2",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page B",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:01:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:01:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [],
+          selection: [],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        input: {
+          targetSessionId: "session_2",
+          targetNodeId: "9:9",
+          referenceNodeId: "8:8",
+          goal: "pixel-match",
+          strategy: "hybrid-reconstruction",
+          maxIterations: 7,
+          allowOutpainting: true,
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--session",
+        "session_2",
+        "--target",
+        "9:9",
+        "--reference",
+        "8:8",
+        "--strategy",
+        "hybrid-reconstruction",
+        "--max-iterations",
+        "7",
+        "--allow-outpainting",
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /session: session_2/);
+    assert.match(stdout, /strategy: hybrid-reconstruction/);
+    assert.match(stdout, /allowOutpainting: true/);
+    assert.match(
+      stdout,
+      /next: --analyze -> --context-pack -> --submit-analysis -> --preview-plan -> --approve-plan -> --apply -> --render -> --measure/,
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct supports the --raster-exact alias and prints the raster workflow hint", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [],
+          selection: [],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs.json",
+      createReconstructionJobFixture("raster-exact", {
+        analysisVersion: "raster-exact-v1",
+        approvalState: "approved",
+        input: {
+          targetSessionId: "session_1",
+          targetNodeId: "target-1",
+          referenceNodeId: "reference-1",
+          goal: "pixel-match",
+          strategy: "raster-exact",
+          maxIterations: 4,
+          allowOutpainting: false,
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--raster-exact"], fixtureDir);
+    assert.match(stdout, /job: job-raster-exact/);
+    assert.match(stdout, /strategy: raster-exact/);
+    assert.match(stdout, /approvalState: approved/);
+    assert.match(stdout, /next: --apply -> --render -> --measure/);
   });
 });
 
