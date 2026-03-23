@@ -946,6 +946,101 @@ test("plugin_bridge_cli reconstruct --approve-plan accepts approval notes and pr
   });
 });
 
+test("plugin_bridge_cli reconstruct --review-asset rejects missing or invalid asset review arguments", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--review-asset"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /--review-asset 需要 --asset 和 --decision approved\|rejected/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --review-asset accepts reviewer decisions and prints approved assets", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__review__asset.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        approvalState: "pending-review",
+        currentStageId: "plan-rebuild",
+        approvedAssetChoices: [
+          {
+            assetId: "asset-1",
+            decision: "approved",
+            note: "Use cropped source",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--job",
+        "job-hybrid",
+        "--review-asset",
+        "--asset",
+        "asset-1",
+        "--decision",
+        "approved",
+        "--note",
+        "Use cropped source",
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /current stage: plan-rebuild/);
+    assert.match(stdout, /approvedAssetChoices:\n- asset-1: approved \| Use cropped source/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --request-changes keeps the plan in review with the supplied note", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__review__approve-plan.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        approvalState: "pending-review",
+        currentStageId: "plan-rebuild",
+        rebuildPlan: {
+          previewOnly: true,
+          summary: ["Need asset adjustment"],
+          ops: [],
+        },
+        reviewFlags: [
+          {
+            id: "flag-1",
+            severity: "warning",
+            kind: "asset",
+            message: "Adjust hero illustration crop",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(
+      [
+        "reconstruct",
+        "--job",
+        "job-hybrid",
+        "--request-changes",
+        "--note",
+        "Adjust hero illustration crop",
+      ],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /approvalState: pending-review/);
+    assert.match(stdout, /current stage: plan-rebuild/);
+    assert.match(stdout, /reviewFlags:\n- \[warning\] asset: Adjust hero illustration crop/);
+    assert.match(stdout, /rebuildPlan:\n- Need asset adjustment/);
+  });
+});
+
 test("plugin_bridge_cli reconstruct --apply prints deduplicated applied nodes and apply stage progress", async () => {
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
@@ -1107,6 +1202,106 @@ test("plugin_bridge_cli reconstruct --refine prints terminal status and actionab
     assert.match(stdout, /current stage: done/);
     assert.match(stdout, /refineSuggestions:\n- \[manual-review\] 当前结果已通过硬门槛。/);
     assert.match(stdout, /stages:\n- done: completed \| Refine complete/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --clear resets applied nodes and returns to the apply stage", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__clear.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        applyStatus: "not_applied",
+        currentStageId: "apply-rebuild",
+        appliedNodeIds: [],
+        stages: [
+          {
+            stageId: "apply-rebuild",
+            status: "completed",
+            message: "Cleared applied nodes",
+            updatedAt: "2026-03-23T12:40:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--clear"], fixtureDir);
+    assert.match(stdout, /applyStatus: not_applied/);
+    assert.match(stdout, /appliedNodeIds: 0/);
+    assert.match(stdout, /stages:\n- apply-rebuild: completed \| Cleared applied nodes/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --iterate prints updated iteration metrics and pending refine suggestions", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__iterate.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        loopStatus: "running",
+        currentStageId: "measure-diff",
+        iterationCount: 2,
+        bestDiffScore: 0.89,
+        lastImprovement: 0.03,
+        stagnationCount: 0,
+        refineSuggestions: [
+          {
+            id: "layout-1",
+            kind: "layout",
+            confidence: 0.77,
+            message: "Tighten spacing in the top card cluster.",
+            bounds: {
+              x: 12,
+              y: 20,
+              width: 100,
+              height: 60,
+            },
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--iterate"], fixtureDir);
+    assert.match(stdout, /loopStatus: running/);
+    assert.match(stdout, /iterationCount: 2/);
+    assert.match(stdout, /bestCompositeScore: 0\.8900/);
+    assert.match(stdout, /lastImprovement: 0\.0300/);
+    assert.match(stdout, /stagnationCount: 0/);
+    assert.match(stdout, /refineSuggestions:\n- \[layout\] Tighten spacing in the top card cluster\./);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --loop prints terminal loop state when the target is reached", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__loop.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        status: "completed",
+        loopStatus: "stopped",
+        stopReason: "target_reached",
+        currentStageId: "done",
+        iterationCount: 3,
+        bestDiffScore: 0.94,
+        lastImprovement: 0.01,
+        stages: [
+          {
+            stageId: "done",
+            status: "completed",
+            message: "Loop converged",
+            updatedAt: "2026-03-23T12:50:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--loop"], fixtureDir);
+    assert.match(stdout, /status: completed/);
+    assert.match(stdout, /loopStatus: stopped/);
+    assert.match(stdout, /stopReason: target_reached/);
+    assert.match(stdout, /iterationCount: 3/);
+    assert.match(stdout, /bestCompositeScore: 0\.9400/);
+    assert.match(stdout, /stages:\n- done: completed \| Loop converged/);
   });
 });
 
