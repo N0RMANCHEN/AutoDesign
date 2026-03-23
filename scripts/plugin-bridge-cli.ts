@@ -44,6 +44,9 @@ const BASE_URL =
   process.env.FIGMATEST_API_URL ??
   "http://localhost:3001";
 const execFileAsync = promisify(execFile);
+const apiFixtureDirectory = process.env.AUTODESIGN_API_FIXTURE_DIR
+  ? path.resolve(process.env.AUTODESIGN_API_FIXTURE_DIR)
+  : null;
 
 type EstimatedScreenQuad = {
   rotationDegrees: number;
@@ -149,7 +152,19 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
+function toFixtureName(pathname: string, method: string) {
+  const normalizedPath = pathname.replace(/^\//, "").replace(/[/?=&:]+/g, "__");
+  const normalizedMethod = method.toLowerCase();
+  return `${normalizedMethod}__${normalizedPath || "root"}.json`;
+}
+
 async function requestJson<T>(pathname: string, init?: RequestInit): Promise<T> {
+  if (apiFixtureDirectory) {
+    const method = String(init?.method || "GET").toUpperCase();
+    const fixturePath = path.join(apiFixtureDirectory, toFixtureName(pathname, method));
+    return readJsonFile<T>(fixturePath);
+  }
+
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${pathname}`, {
