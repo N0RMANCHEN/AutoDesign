@@ -692,6 +692,79 @@ test("plugin_bridge_cli reconstruct supports the --raster-exact alias and prints
   });
 });
 
+test("plugin_bridge_cli reconstruct --context-pack writes pack and preview artifacts to disk", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-context-pack-"));
+    try {
+      await writeFixture(
+        fixtureDir,
+        "post__api__reconstruction__jobs__job-hybrid__context-pack.json",
+        {
+          jobId: "job-hybrid",
+          mode: "codex-assisted",
+          analysisProvider: "codex-assisted",
+          analysisVersionTarget: "codex-v1",
+          generatedAt: "2026-03-23T12:00:00.000Z",
+          strategy: "hybrid-reconstruction",
+          targetNode: {
+            id: "target-1",
+            name: "Target Frame",
+            type: "FRAME",
+            fillable: true,
+            fills: [],
+            fillStyleId: null,
+            width: 160,
+            height: 100,
+          },
+          referenceNode: {
+            id: "reference-1",
+            name: "Reference Frame",
+            type: "FRAME",
+            fillable: true,
+            fills: [],
+            fillStyleId: null,
+            width: 160,
+            height: 100,
+          },
+          referencePreviewDataUrl: pngDataUrl("reference-preview"),
+          referenceRectifiedPreviewDataUrl: pngDataUrl("reference-rectified"),
+          targetPreviewDataUrl: pngDataUrl("target-preview"),
+          currentAnalysis: null,
+          currentFontMatches: [],
+          currentReviewFlags: [],
+          currentWarnings: ["warning a"],
+          workflow: ["step 1", "step 2"],
+          scoringRubric: ["rubric 1"],
+          guidance: ["guide 1", "guide 2"],
+        },
+      );
+
+      const { stdout } = await runCli(
+        ["reconstruct", "--job", "job-hybrid", "--context-pack", "--out", outputDir],
+        fixtureDir,
+      );
+
+      const contextPath = path.join(outputDir, "job-hybrid-context-pack.json");
+      const referencePath = path.join(outputDir, "job-hybrid-reference.png");
+      const rectifiedPath = path.join(outputDir, "job-hybrid-reference-rectified.png");
+      const targetPath = path.join(outputDir, "job-hybrid-target.png");
+
+      assert.equal(JSON.parse(await readFile(contextPath, "utf8")).jobId, "job-hybrid");
+      assert.equal((await readFile(referencePath)).toString("utf8"), "reference-preview");
+      assert.equal((await readFile(rectifiedPath)).toString("utf8"), "reference-rectified");
+      assert.equal((await readFile(targetPath)).toString("utf8"), "target-preview");
+      assert.match(stdout, /job: job-hybrid/);
+      assert.match(stdout, /mode: codex-assisted/);
+      assert.match(stdout, new RegExp(`contextPack: ${contextPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.match(stdout, /guidance:\n- guide 1\n- guide 2/);
+      assert.match(stdout, /workflow:\n- step 1\n- step 2/);
+      assert.match(stdout, /scoringRubric:\n- rubric 1/);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("plugin_bridge_cli rejects unsupported modes with a usage message", async () => {
   let failure: any = null;
   try {
