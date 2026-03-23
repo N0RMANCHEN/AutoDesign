@@ -142,7 +142,51 @@ export function nodeFillSummary(node: any) {
   });
 }
 
+function getAbsolutePosition(node: any) {
+  if ("absoluteTransform" in node && Array.isArray(node.absoluteTransform)) {
+    const transform = node.absoluteTransform;
+    if (
+      Array.isArray(transform[0]) &&
+      Array.isArray(transform[1]) &&
+      typeof transform[0][2] === "number" &&
+      typeof transform[1][2] === "number"
+    ) {
+      return {
+        x: transform[0][2],
+        y: transform[1][2],
+      };
+    }
+  }
+
+  if ("x" in node && "y" in node && typeof node.x === "number" && typeof node.y === "number") {
+    return {
+      x: node.x,
+      y: node.y,
+    };
+  }
+
+  return null;
+}
+
+function getParentNode(node: any) {
+  return node && "parent" in node ? node.parent : null;
+}
+
+function readLayoutMode(node: any) {
+  return node && "layoutMode" in node && typeof node.layoutMode === "string"
+    ? node.layoutMode
+    : null;
+}
+
+function readLayoutPositioning(node: any) {
+  return node && "layoutPositioning" in node && typeof node.layoutPositioning === "string"
+    ? node.layoutPositioning
+    : null;
+}
+
 export function nodeSummary(node: any): PluginNodeSummary {
+  const parent = getParentNode(node);
+  const absolutePosition = getAbsolutePosition(node);
   return {
     id: node.id,
     name: node.name,
@@ -150,8 +194,17 @@ export function nodeSummary(node: any): PluginNodeSummary {
     fillable: supportsFills(node),
     fills: nodeFillSummary(node),
     fillStyleId: supportsFills(node) ? node.fillStyleId || null : null,
+    x: typeof node.x === "number" ? node.x : null,
+    y: typeof node.y === "number" ? node.y : null,
+    absoluteX: absolutePosition ? absolutePosition.x : null,
+    absoluteY: absolutePosition ? absolutePosition.y : null,
     width: typeof node.width === "number" ? node.width : null,
     height: typeof node.height === "number" ? node.height : null,
+    parentNodeId: parent?.id || null,
+    parentNodeType: parent?.type || null,
+    parentLayoutMode: readLayoutMode(parent),
+    layoutMode: readLayoutMode(node),
+    layoutPositioning: readLayoutPositioning(node),
     hasImageFill: Boolean(findImagePaint(node)),
   };
 }

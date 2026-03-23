@@ -8,8 +8,17 @@ export type PluginNodeSummary = {
   fillable: boolean;
   fills: string[];
   fillStyleId: string | null;
+  x?: number | null;
+  y?: number | null;
+  absoluteX?: number | null;
+  absoluteY?: number | null;
   width?: number | null;
   height?: number | null;
+  parentNodeId?: string | null;
+  parentNodeType?: string | null;
+  parentLayoutMode?: string | null;
+  layoutMode?: string | null;
+  layoutPositioning?: string | null;
   previewDataUrl?: string | null;
   hasImageFill?: boolean;
 };

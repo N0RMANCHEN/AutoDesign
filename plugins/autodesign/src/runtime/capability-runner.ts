@@ -13,6 +13,7 @@ import type {
   FigmaPluginCommand,
   FigmaPluginCommandBatch,
 } from "../../../../shared/plugin-contract.js";
+import { requiresExplicitNodeIdsForExternalCapability } from "../../../../shared/plugin-targeting.js";
 import {
   clonePaints,
   createSolidPaint,
@@ -583,6 +584,133 @@ function getNodeBounds(node: any) {
   };
 }
 
+function getAbsolutePosition(node: any) {
+  if ("absoluteTransform" in node && Array.isArray(node.absoluteTransform)) {
+    const transform = node.absoluteTransform;
+    if (
+      Array.isArray(transform[0]) &&
+      Array.isArray(transform[1]) &&
+      typeof transform[0][2] === "number" &&
+      typeof transform[1][2] === "number"
+    ) {
+      return {
+        x: transform[0][2],
+        y: transform[1][2],
+      };
+    }
+  }
+
+  if (supportsPosition(node)) {
+    return {
+      x: node.x,
+      y: node.y,
+    };
+  }
+
+  throw new Error(`${node.name || node.id} 缺少可计算绝对位置的几何信息。`);
+}
+
+function getAbsoluteNodeBounds(node: any) {
+  const absolute = getAbsolutePosition(node);
+  if (typeof node.width !== "number" || typeof node.height !== "number") {
+    throw new Error(`${node.name || node.id} 缺少可计算绝对边界的尺寸信息。`);
+  }
+
+  return {
+    x: absolute.x,
+    y: absolute.y,
+    width: node.width,
+    height: node.height,
+  };
+}
+
+function getSceneRoot(node: any) {
+  let current = node;
+  while (current && "parent" in current && current.parent) {
+    current = current.parent;
+  }
+  return current;
+}
+
+function getParentAbsoluteOrigin(parent: any) {
+  if (!parent || parent.type === "PAGE") {
+    return {
+      x: 0,
+      y: 0,
+    };
+  }
+
+  return getAbsolutePosition(parent);
+}
+
+function toLocalPosition(parent: any, absolutePosition: { x: number; y: number }) {
+  const origin = getParentAbsoluteOrigin(parent);
+  return {
+    x: absolutePosition.x - origin.x,
+    y: absolutePosition.y - origin.y,
+  };
+}
+
+function parentUsesAutoLayout(parent: any) {
+  return "layoutMode" in parent && typeof parent.layoutMode === "string" && parent.layoutMode !== "NONE";
+}
+
+async function resolveAnchorNodeForCreation(command: FigmaCapabilityCommand) {
+  if (!command.nodeIds || command.nodeIds.length === 0) {
+    throw new Error(
+      `外部修改命令必须指定 nodeIds。capability=${command.capabilityId}。创建节点时请使用 nodeIds 指定锚点节点。`,
+    );
+  }
+
+  if (command.nodeIds.length !== 1) {
+    throw new Error(`创建节点时只支持一个锚点 nodeId，当前收到 ${command.nodeIds.length} 个。`);
+  }
+
+  const anchorNode = await figma.getNodeByIdAsync(command.nodeIds[0]);
+  if (!anchorNode) {
+    throw new Error(`锚点 nodeId "${command.nodeIds[0]}" 未找到。`);
+  }
+
+  return anchorNode;
+}
+
+function computeRelativePlacement(
+  anchorNode: any,
+  size: { width: number; height: number },
+  placement: "above" | "below" | "left" | "right",
+  gap: number,
+) {
+  const anchorBounds = getAbsoluteNodeBounds(anchorNode);
+
+  switch (placement) {
+    case "below":
+      return {
+        x: anchorBounds.x + (anchorBounds.width - size.width) / 2,
+        y: anchorBounds.y + anchorBounds.height + gap,
+      };
+    case "above":
+      return {
+        x: anchorBounds.x + (anchorBounds.width - size.width) / 2,
+        y: anchorBounds.y - gap - size.height,
+      };
+    case "left":
+      return {
+        x: anchorBounds.x - gap - size.width,
+        y: anchorBounds.y + (anchorBounds.height - size.height) / 2,
+      };
+    case "right":
+      return {
+        x: anchorBounds.x + anchorBounds.width + gap,
+        y: anchorBounds.y + (anchorBounds.height - size.height) / 2,
+      };
+    default:
+      return {
+        x: anchorBounds.x,
+        y: anchorBounds.y,
+      };
+  }
+}
+
 function groupNodes(nodes: any[], name?: string) {
   if (nodes.length < 2) {
     throw new Error("分组至少需要 2 个节点。");
@@ -1039,13 +1167,13 @@ async function getTargetNodes(
 ): Promise<ReturnType<typeof getSelection>> {
   const selection = getSelection();
   if (!command.nodeIds || command.nodeIds.length === 0) {
-    if (batchSource === "codex") {
-      const desc = getPluginCapabilityDescriptor(command.capabilityId);
-      if (desc?.requiresSelection) {
-        throw new Error(
-          `外部命令必须指定 nodeIds。当前有 ${selection.length} 个选中节点，请在命令中添加 nodeIds 以明确目标。`,
-        );
-      }
+    if (
+      batchSource === "codex" &&
+      requiresExplicitNodeIdsForExternalCapability(command.capabilityId)
+    ) {
+      throw new Error(
+        `外部修改命令必须指定 nodeIds。capability=${command.capabilityId}，当前 selection=${selection.length}。请在命令中添加 nodeIds 以明确目标。`,
+      );
     }
     return selection;
   }
@@ -1096,6 +1224,14 @@ async function runCapabilityCommand(
     return successResult(command.capabilityId, `Dry run: ${descriptor.label}`, {
       warnings: ["dryRun=true，本次未实际修改 Figma 文件。"],
     });
+  }
+
+  if (
+    batchSource === "codex" &&
+    requiresExplicitNodeIdsForExternalCapability(command.capabilityId) &&
+    (!command.nodeIds || command.nodeIds.length === 0)
+  ) {
+    throw new Error(`外部修改命令必须指定 nodeIds。capability=${command.capabilityId}。`);
   }
 
   // Capture undo snapshot before execution (for property-modifying capabilities)
@@ -1909,6 +2045,8 @@ async function runCapabilityCommandInner(
         height: number;
         x?: number;
         y?: number;
+        placement?: "above" | "below" | "left" | "right";
+        gap?: number;
         fillHex?: string;
         strokeHex?: string;
         strokeWeight?: number;
@@ -1920,18 +2058,51 @@ async function runCapabilityCommandInner(
         throw new Error("Rectangle 的宽高必须是大于 0 的数字。");
       }
 
-      const parent = await resolveParentNode(payload.parentNodeId);
+      const anchorNode = payload.placement
+        ? await resolveAnchorNodeForCreation(command)
+        : null;
+      const parent = payload.parentNodeId
+        ? await resolveParentNode(payload.parentNodeId)
+        : anchorNode && anchorNode.parent
+          ? anchorNode.parent
+          : await resolveParentNode(undefined);
+      let position = {
+        x: Number.isFinite(payload.x) ? Number(payload.x) : undefined,
+        y: Number.isFinite(payload.y) ? Number(payload.y) : undefined,
+      };
+      if (payload.placement) {
+        const gap = payload.gap === undefined ? 16 : Number(payload.gap);
+        if (!Number.isFinite(gap) || gap < 0) {
+          throw new Error("relative placement gap 必须是大于等于 0 的数字。");
+        }
+        if (getSceneRoot(anchorNode) !== getSceneRoot(parent)) {
+          throw new Error("relative placement 要求锚点节点和目标 parent 位于同一页面场景树。");
+        }
+        const absolutePosition = computeRelativePlacement(
+          anchorNode,
+          { width: payload.width, height: payload.height },
+          payload.placement,
+          gap,
+        );
+        position = toLocalPosition(parent, absolutePosition);
+      }
       const node = figma.createRectangle();
       parent.appendChild(node);
+      if (parentUsesAutoLayout(parent)) {
+        if (!("layoutPositioning" in node)) {
+          throw new Error("目标父级启用了 Auto Layout，但新矩形不支持 absolute positioning。");
+        }
+        node.layoutPositioning = "ABSOLUTE";
+      }
       node.resize(payload.width, payload.height);
       if (payload.name && payload.name.trim()) {
         node.name = payload.name.trim();
       }
-      if (Number.isFinite(payload.x)) {
-        node.x = Number(payload.x);
+      if (Number.isFinite(position.x)) {
+        node.x = Number(position.x);
       }
-      if (Number.isFinite(payload.y)) {
-        node.y = Number(payload.y);
+      if (Number.isFinite(position.y)) {
+        node.y = Number(position.y);
       }
       if (payload.cornerRadius !== undefined) {
         if (!Number.isFinite(payload.cornerRadius) || payload.cornerRadius < 0) {

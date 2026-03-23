@@ -99,11 +99,11 @@ npm run build:plugins
 
 正式插件导入路径：
 
-- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
+- [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json)
 
 Smoke 插件导入路径：
 
-- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
+- [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
 
 ### 5. 在 Figma Desktop 导入插件
 
@@ -111,7 +111,7 @@ Smoke 插件导入路径：
 2. `Plugins` -> `Development` -> `Import plugin from manifest...`
 3. 先选择 smoke 插件的 `dist/manifest.json`
 4. 验证 smoke 插件能正常运行
-5. 再导入正式插件 [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
+5. 再导入正式插件 [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json)
 6. 运行 `AutoDesign`
 
 > 只导入 `dist/manifest.json`，不要直接导入 `src/`
@@ -329,11 +329,11 @@ npm run dev
 
 ### 正式插件导入文件
 
-- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
+- [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json)
 
 ### Smoke 插件导入文件
 
-- [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
+- [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign-smoke/dist/manifest.json)
 
 ### 当前插件名
 

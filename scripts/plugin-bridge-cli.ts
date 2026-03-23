@@ -5,13 +5,17 @@ import {
   composePluginCommandsFromPrompt,
   type PluginCommandComposition,
 } from "../shared/plugin-command-composer.js";
-import type { PluginCapabilityId } from "../shared/plugin-capabilities.js";
 import type {
   PluginBridgeSession,
   PluginBridgeSnapshot,
   QueuePluginCommandPayload,
 } from "../shared/plugin-bridge.js";
 import type { FigmaPluginCommandBatch } from "../shared/plugin-contract.js";
+import {
+  collectCapabilityIds,
+  collectMutatingCapabilityIds,
+  prepareBatchForExternalDispatch,
+} from "../shared/plugin-targeting.js";
 import type {
   ApproveReconstructionPlanPayload,
   CreateReconstructionJobPayload,
@@ -28,7 +32,7 @@ const BASE_URL =
   process.env.FIGMATEST_API_URL ??
   "http://localhost:3001";
 
-type Mode = "status" | "send" | "preview" | "reconstruct";
+type Mode = "status" | "send" | "preview" | "inspect" | "reconstruct";
 type PreviewTarget = {
   index: number;
   node: PluginBridgeSession["selection"][number];
@@ -40,14 +44,14 @@ function fail(message: string): never {
 
 function parseMode(argv: string[]): Mode {
   const mode = argv[2];
-  if (mode === "status" || mode === "send" || mode === "preview") {
+  if (mode === "status" || mode === "send" || mode === "preview" || mode === "inspect") {
     return mode;
   }
   if (mode === "reconstruct") {
     return mode;
   }
   fail(
-    "Usage: npm run plugin:status OR npm run plugin:send -- --prompt \"把当前选中对象改成粉色\" OR npm run plugin:preview OR npm run plugin:reconstruct",
+    "Usage: npm run plugin:status OR npm run plugin:inspect OR npm run plugin:send -- --prompt \"把当前选中对象改成粉色\" OR npm run plugin:preview OR npm run plugin:reconstruct",
   );
 }
 
@@ -170,9 +174,9 @@ function printSelection(session: PluginBridgeSession) {
     return;
   }
 
-  for (const node of session.selection) {
+  for (const [index, node] of session.selection.entries()) {
     console.log(
-      `- ${node.name} [${node.type}] id=${node.id} fills=${node.fills.join(", ") || "none"} fillStyleId=${node.fillStyleId || "none"}`,
+      `- [${index}] ${node.name} [${node.type}] id=${node.id} fills=${node.fills.join(", ") || "none"} fillStyleId=${node.fillStyleId || "none"} size=${node.width ?? "?"}x${node.height ?? "?"} local=(${node.x ?? "?"}, ${node.y ?? "?"}) abs=(${node.absoluteX ?? "?"}, ${node.absoluteY ?? "?"}) parent=${node.parentNodeType || "none"}:${node.parentNodeId || "none"} parentLayout=${node.parentLayoutMode || "none"} layout=${node.layoutMode || "none"} positioning=${node.layoutPositioning || "none"}`,
     );
   }
 }
@@ -190,41 +194,49 @@ function printCapabilities(session: PluginBridgeSession) {
   );
 }
 
-function collectCapabilityIds(batch: FigmaPluginCommandBatch) {
-  const ids = new Set<PluginCapabilityId>();
+function parseNodeIds(nodeIdsRaw: string | null) {
+  if (!nodeIdsRaw) {
+    return [];
+  }
+  return nodeIdsRaw.split(",").map((id) => id.trim()).filter(Boolean);
+}
 
-  for (const command of batch.commands) {
-    if (command.type === "capability") {
-      ids.add(command.capabilityId);
-      continue;
-    }
-
-    switch (command.type) {
-      case "refresh-selection":
-        ids.add("selection.refresh");
-        break;
-      case "set-selection-fill":
-        ids.add("fills.set-fill");
-        break;
-      case "set-selection-stroke":
-        ids.add("strokes.set-stroke");
-        break;
-      case "set-selection-radius":
-        ids.add("geometry.set-radius");
-        break;
-      case "set-selection-opacity":
-        ids.add("nodes.set-opacity");
-        break;
-      case "create-or-update-paint-style":
-        ids.add("styles.upsert-paint-style");
-        break;
-      case "create-or-update-color-variable":
-        ids.add("variables.upsert-color-variable");
-        break;
-    }
+function formatSelectionForTargeting(session: PluginBridgeSession) {
+  if (!session.selection.length) {
+    return "当前 selection 为空。";
   }
 
-  return [...ids];
+  return [
+    "当前 selection:",
+    ...session.selection.map(
+      (node) => `- ${node.name} [${node.type}] id=${node.id}`,
+    ),
+  ].join("\n");
+}
+
+function ensureExplicitTargetingForMutations(
+  batch: FigmaPluginCommandBatch,
+  session: PluginBridgeSession,
+  nodeIds: string[],
+) {
+  const mutatingCapabilityIds = collectMutatingCapabilityIds(batch);
+  if (!mutatingCapabilityIds.length) {
+    return;
+  }
+
+  if (!session.runtimeFeatures?.supportsExplicitNodeTargeting) {
+    fail("目标插件当前不支持显式 nodeIds 定向，已拒绝发送修改类外部命令。");
+  }
+
+  if (!nodeIds.length) {
+    fail(
+      [
+        `修改类外部命令必须提供 --node-ids。涉及能力：${mutatingCapabilityIds.join(", ")}`,
+        '示例：npm run plugin:send -- --prompt "把指定对象改成深灰色" --node-ids 1:2',
+        formatSelectionForTargeting(session),
+      ].join("\n"),
+    );
+  }
 }
 
 function printComposition(composition: PluginCommandComposition | null) {
@@ -527,16 +539,10 @@ async function runStatus() {
 async function runSend(argv: string[]) {
   const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
   const session = pickSession(snapshot.sessions, readFlag(argv, "--session"));
-  const { batch, composition } = parseBatchFromArgs(argv);
-  const nodeIdsRaw = readFlag(argv, "--node-ids");
-  if (nodeIdsRaw) {
-    const nodeIds = nodeIdsRaw.split(",").map((id) => id.trim()).filter(Boolean);
-    for (const command of batch.commands) {
-      if (command.type === "capability") {
-        command.nodeIds = nodeIds;
-      }
-    }
-  }
+  const { batch: rawBatch, composition } = parseBatchFromArgs(argv);
+  const nodeIds = parseNodeIds(readFlag(argv, "--node-ids"));
+  ensureExplicitTargetingForMutations(rawBatch, session, nodeIds);
+  const batch = prepareBatchForExternalDispatch(rawBatch, nodeIds);
   const payload: QueuePluginCommandPayload = {
     targetSessionId: session.id,
     source: "codex",
@@ -584,6 +590,29 @@ async function runPreview(argv: string[]) {
     const filePath = path.join(outputDirectory, fileName);
     await writeFile(filePath, parsePreviewDataUrl(target.node));
     console.log(filePath);
+  }
+}
+
+async function runInspect(argv: string[]) {
+  const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
+  const session = pickSession(snapshot.sessions, readFlag(argv, "--session"));
+  console.log(
+    `${session.id} | ${session.label} ${session.pluginVersion} | ${session.status} | ${session.fileName} / ${session.pageName}`,
+  );
+  printCapabilities(session);
+  printSelection(session);
+
+  const outputDirectory =
+    readFlag(argv, "--out") || path.join(process.cwd(), "data", "plugin-previews");
+  const targets = pickPreviewTargets(session, readFlag(argv, "--index"));
+
+  await mkdir(outputDirectory, { recursive: true });
+  console.log("previews:");
+  for (const target of targets) {
+    const fileName = `${session.id}-${target.index}-${sanitizeFileSegment(target.node.name)}.png`;
+    const filePath = path.join(outputDirectory, fileName);
+    await writeFile(filePath, parsePreviewDataUrl(target.node));
+    console.log(`- [${target.index}] ${filePath}`);
   }
 }
 
@@ -797,6 +826,11 @@ void (async () => {
 
   if (mode === "preview") {
     await runPreview(process.argv);
+    return;
+  }
+
+  if (mode === "inspect") {
+    await runInspect(process.argv);
     return;
   }
 

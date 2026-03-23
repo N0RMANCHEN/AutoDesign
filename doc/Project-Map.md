@@ -61,10 +61,10 @@
 
 入口：
 
-- 正式插件 [manifest.json](/Users/hirohi/AutoDesign/plugins/autodesign/dist/manifest.json)
-- 插件执行器 [main.ts](/Users/hirohi/AutoDesign/plugins/autodesign/src/main.ts)
-- 运行时能力 [capability-runner.ts](/Users/hirohi/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)
-- bridge CLI [plugin-bridge-cli.ts](/Users/hirohi/AutoDesign/scripts/plugin-bridge-cli.ts)
+- 正式插件 [manifest.json](/Users/BofeiChen/AutoDesign/plugins/autodesign/dist/manifest.json)
+- 插件执行器 [main.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/main.ts)
+- 运行时能力 [capability-runner.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)
+- bridge CLI [plugin-bridge-cli.ts](/Users/BofeiChen/AutoDesign/scripts/plugin-bridge-cli.ts)
 
 这一侧负责：
 

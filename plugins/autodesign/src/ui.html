@@ -8,6 +8,12 @@
         color-scheme: light dark;
         --frame-width: 252px;
         --frame-height: 116px;
+        --selection-shell-size: 40px;
+        --selection-shell-inset: 4px;
+        --selection-shell-radius: 14px;
+        --selection-thumb-size: calc(var(--selection-shell-size) - (var(--selection-shell-inset) * 2));
+        --selection-thumb-radius: calc(var(--selection-shell-radius) - var(--selection-shell-inset) - 2px);
+        --selection-row-gap: 8px;
         --bg: var(--figma-color-bg, #ffffff);
         --surface: var(--figma-color-bg, #ffffff);
         --surface-container: var(--figma-color-bg, #ffffff);
@@ -17,6 +23,7 @@
         --muted: var(--figma-color-text-secondary, #6b7280);
         --thumb-bg: var(--figma-color-bg, #ffffff);
         --scrollbar: var(--figma-color-text-tertiary, #c9ced6);
+        --ios-squircle-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath fill='white' d='M50 0C71 0 82 0 90 8C100 18 100 29 100 50C100 71 100 82 90 92C82 100 71 100 50 100C29 100 18 100 8 92C0 82 0 71 0 50C0 29 0 18 8 8C18 0 29 0 50 0Z'/%3E%3C/svg%3E");
       }
 
       * {
@@ -66,20 +73,38 @@
 
       .selection-item {
         display: grid;
-        grid-template-columns: 32px minmax(0, 1fr);
-        gap: 10px;
+        grid-template-columns: var(--selection-shell-size) minmax(0, 1fr);
+        gap: var(--selection-row-gap);
         align-items: center;
         height: 48px;
-        padding: 8px 12px;
-        border-radius: 12px;
+        padding: 4px 8px 4px 4px;
+        border-radius: var(--selection-shell-radius);
         background: var(--selection-fill);
         overflow: hidden;
       }
 
+      .smooth-corners {
+        border-radius: inherit;
+        -webkit-mask: var(--ios-squircle-mask) center / 100% 100% no-repeat;
+        mask: var(--ios-squircle-mask) center / 100% 100% no-repeat;
+      }
+
+      .selection-thumb-shell {
+        width: var(--selection-shell-size);
+        height: var(--selection-shell-size);
+        padding: var(--selection-shell-inset) calc(var(--selection-shell-inset) - 2px) var(--selection-shell-inset)
+          calc(var(--selection-shell-inset) + 2px);
+        border-radius: var(--selection-shell-radius);
+        background: transparent;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+
       .selection-thumb {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
+        width: var(--selection-thumb-size);
+        height: var(--selection-thumb-size);
+        border-radius: var(--selection-thumb-radius);
         background: var(--thumb-bg);
         overflow: hidden;
         display: grid;
@@ -96,7 +121,7 @@
       .selection-thumb-fallback {
         width: 12px;
         height: 12px;
-        border-radius: 4px;
+        border-radius: 3px;
         background: var(--figma-color-bg-tertiary, #c9ccd3);
       }
 
@@ -228,10 +253,10 @@
 
       function previewMarkup(item) {
         if (item.previewDataUrl) {
-          return `<img src="${escapeHtml(item.previewDataUrl)}" alt="" />`;
+          return `<div class="selection-thumb smooth-corners"><img src="${escapeHtml(item.previewDataUrl)}" alt="" /></div>`;
         }
 
-        return '<span class="selection-thumb-fallback"></span>';
+        return '<div class="selection-thumb smooth-corners"><span class="selection-thumb-fallback"></span></div>';
       }
 
       function renderSelection(items) {
@@ -254,7 +279,7 @@
           const fills = Array.isArray(item.fills) ? item.fills : [];
           element.className = "selection-item";
           element.innerHTML = `
-            <div class="selection-thumb">${previewMarkup(item)}</div>
+            <div class="selection-thumb-shell smooth-corners">${previewMarkup(item)}</div>
             <div class="selection-content">
               <div class="selection-name">${escapeHtml(item.name)}</div>
               <div class="selection-meta">

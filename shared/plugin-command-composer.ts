@@ -15,6 +15,8 @@ const namedColors: Array<[string, string]> = [
   ["浅粉", "#F8A5C2"],
   ["粉色", "#FF6FAE"],
   ["粉红", "#FF6FAE"],
+  ["深灰色", "#4A4F55"],
+  ["深灰", "#4A4F55"],
   ["红色", "#FF5A5F"],
   ["橙色", "#F28C28"],
   ["黄色", "#F4C542"],
@@ -201,6 +203,104 @@ function parseExplicitName(text: string) {
   return shortName ? shortName[1].trim() : null;
 }
 
+function parseRectanglePlacement(text: string) {
+  const normalized = text.toLowerCase();
+  if (text.includes("下方") || text.includes("下面") || text.includes("下边") || normalized.includes("below")) {
+    return "below" as const;
+  }
+  if (text.includes("上方") || text.includes("上面") || text.includes("上边") || normalized.includes("above")) {
+    return "above" as const;
+  }
+  if (text.includes("左侧") || text.includes("左边") || normalized.includes("left of")) {
+    return "left" as const;
+  }
+  if (text.includes("右侧") || text.includes("右边") || normalized.includes("right of")) {
+    return "right" as const;
+  }
+  return null;
+}
+
+function parseRectangleSize(text: string) {
+  const pair = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  if (pair) {
+    return {
+      width: Number.parseFloat(pair[1]),
+      height: Number.parseFloat(pair[2]),
+    };
+  }
+
+  const widthMatch = text.match(/(?:宽|width)\s*(\d+(?:\.\d+)?)/i);
+  const heightMatch = text.match(/(?:高|height)\s*(\d+(?:\.\d+)?)/i);
+  if (widthMatch && heightMatch) {
+    return {
+      width: Number.parseFloat(widthMatch[1]),
+      height: Number.parseFloat(heightMatch[1]),
+    };
+  }
+
+  if (text.includes("方块") || text.includes("正方形") || text.toLowerCase().includes("square")) {
+    const prefixed = text.match(/(?:方块|正方形|square)\s*(\d+(?:\.\d+)?)/i);
+    const suffixed = text.match(/(\d+(?:\.\d+)?)\s*(?:px)?\s*(?:方块|正方形|square)/i);
+    const size = prefixed
+      ? Number.parseFloat(prefixed[1])
+      : suffixed
+        ? Number.parseFloat(suffixed[1])
+        : 80;
+    return {
+      width: size,
+      height: size,
+    };
+  }
+
+  if (text.includes("矩形") || text.toLowerCase().includes("rectangle")) {
+    const values = resolveNumbers(text);
+    if (values.length >= 2) {
+      return {
+        width: values[0],
+        height: values[1],
+      };
+    }
+    return {
+      width: 120,
+      height: 80,
+    };
+  }
+
+  return null;
+}
+
+function parseGap(text: string) {
+  const explicitGap = text.match(/(?:间距|gap|偏移)\s*(\d+(?:\.\d+)?)/i);
+  if (explicitGap) {
+    return Number.parseFloat(explicitGap[1]);
+  }
+
+  const placement = parseRectanglePlacement(text);
+  if (!placement) {
+    return undefined;
+  }
+
+  const values = resolveNumbers(text);
+  if (!values.length) {
+    return 16;
+  }
+
+  const size = parseRectangleSize(text);
+  if (size) {
+    if (values.length >= 3) {
+      return values[2];
+    }
+    return 16;
+  }
+
+  return values[0] ?? 16;
+}
+
+function extractDrawingClause(text: string) {
+  const match = text.match(/(画|创建|新建).*/i);
+  return match ? match[0] : text;
+}
+
 export function composePluginCommandsFromPrompt(prompt: string): PluginCommandComposition {
   const normalized = prompt.trim();
   const commands: FigmaCapabilityCommand[] = [];
@@ -350,6 +450,37 @@ export function composePluginCommandsFromPrompt(prompt: string): PluginCommandCo
         explicitName || padding !== undefined
           ? `已生成 Frame 包裹命令${explicitName ? `：${explicitName}` : ""}${padding !== undefined ? `，padding ${padding}` : ""}。`
           : "已生成 Frame 包裹命令。",
+      );
+      continue;
+    }
+
+    if (
+      (line.includes("画") || line.includes("创建") || line.includes("新建")) &&
+      (line.includes("方块") || line.includes("正方形") || line.includes("矩形") || line.toLowerCase().includes("square") || line.toLowerCase().includes("rectangle"))
+    ) {
+      const size = parseRectangleSize(line);
+      if (!size) {
+        warnings.push(`无法从这句里识别矩形尺寸：${line}`);
+        continue;
+      }
+
+      const placement = parseRectanglePlacement(line);
+      const gap = parseGap(line);
+      const fillHex = resolveColor(extractDrawingClause(line)) || "#D9D9D9";
+      commands.push({
+        type: "capability",
+        capabilityId: "nodes.create-rectangle",
+        payload: {
+          width: size.width,
+          height: size.height,
+          fillHex,
+          ...(explicitName ? { name: explicitName } : {}),
+          ...(placement ? { placement } : {}),
+          ...(gap !== undefined ? { gap } : {}),
+        },
+      });
+      notes.push(
+        `已生成矩形创建命令：${size.width}x${size.height}${placement ? `，${placement} gap ${gap ?? 16}` : ""}，fill ${fillHex}。`,
       );
       continue;
     }

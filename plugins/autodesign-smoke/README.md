@@ -20,7 +20,7 @@ npm run build:plugins
 
 导入路径：
 
-- `/Users/hirohi/AutoDesign/plugins/autodesign-smoke/dist/manifest.json`
+- `/Users/BofeiChen/AutoDesign/plugins/autodesign-smoke/dist/manifest.json`
 
 插件名称：
 

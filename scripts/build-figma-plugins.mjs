@@ -67,7 +67,6 @@ async function buildPluginPackage(pluginPackage) {
   const manifestTemplatePath = path.join(packageDirectory, "manifest.template.json");
   const mainEntryPath = path.join(packageDirectory, pluginPackage.entryFile);
   const manifest = JSON.parse(await readFile(manifestTemplatePath, "utf8"));
-  let banner = undefined;
 
   await rm(distDirectory, { recursive: true, force: true });
   await mkdir(distDirectory, { recursive: true });
@@ -76,9 +75,6 @@ async function buildPluginPackage(pluginPackage) {
     const uiSourcePath = path.join(packageDirectory, pluginPackage.uiFile);
     if (await fileExists(uiSourcePath)) {
       await validatePluginUiLock(packageDirectory, pluginPackage.uiFile);
-      banner = {
-        js: `const __html__ = ${JSON.stringify(await readFile(uiSourcePath, "utf8"))};`,
-      };
     }
   }
 
@@ -91,7 +87,6 @@ async function buildPluginPackage(pluginPackage) {
     charset: "utf8",
     legalComments: "none",
     target: ["es2017"],
-    banner,
   });
 
   const distManifest = {
@@ -103,10 +98,7 @@ async function buildPluginPackage(pluginPackage) {
     const uiSourcePath = path.join(packageDirectory, pluginPackage.uiFile);
     if (await fileExists(uiSourcePath)) {
       await copyFile(uiSourcePath, path.join(distDirectory, "ui.html"));
-      // NOTE: Do NOT set distManifest.ui here.
-      // __html__ is already injected via esbuild banner (line 68).
-      // Setting manifest.ui causes Figma to also inject __html__,
-      // resulting in "Identifier '__html__' has already been declared".
+      distManifest.ui = "ui.html";
     }
   }
 
@@ -138,12 +130,9 @@ async function validatePluginBuild(pluginPackage, distDirectory, distManifest) {
 
   const uiPath = path.join(distDirectory, "ui.html");
   ensure(await fileExists(uiPath), `${pluginPackage.directory}: ui.html missing from dist.`);
-  ensure(!("ui" in distManifest), `${pluginPackage.directory}: manifest.ui must stay unset when HTML is injected.`);
+  ensure(distManifest.ui === "ui.html", `${pluginPackage.directory}: manifest.ui must be ui.html.`);
 
-  const hasInjectedUi =
-    code.includes("figma.showUI(__html__") ||
-    (code.includes("figma.showUI(") && code.includes("<!doctype html>"));
-  ensure(hasInjectedUi, `${pluginPackage.directory}: showUI HTML injection missing.`);
+  ensure(code.includes("figma.showUI(__html__"), `${pluginPackage.directory}: showUI must use __html__.`);
 }
 
 async function validatePluginUiLock(packageDirectory, uiFile) {

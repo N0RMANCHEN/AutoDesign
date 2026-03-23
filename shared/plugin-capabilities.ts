@@ -74,6 +74,8 @@ export type PluginCapabilityPayloadMap = {
     height: number;
     x?: number;
     y?: number;
+    placement?: "above" | "below" | "left" | "right";
+    gap?: number;
     fillHex?: string;
     strokeHex?: string;
     strokeWeight?: number;
