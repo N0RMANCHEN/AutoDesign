@@ -946,6 +946,170 @@ test("plugin_bridge_cli reconstruct --approve-plan accepts approval notes and pr
   });
 });
 
+test("plugin_bridge_cli reconstruct --apply prints deduplicated applied nodes and apply stage progress", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__apply.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        applyStatus: "applied",
+        currentStageId: "apply-rebuild",
+        appliedNodeIds: ["node-a", "node-b"],
+        stages: [
+          {
+            stageId: "apply-rebuild",
+            status: "completed",
+            message: "Rebuild applied",
+            updatedAt: "2026-03-23T12:10:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--apply"], fixtureDir);
+    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /applyStatus: applied/);
+    assert.match(stdout, /current stage: apply-rebuild/);
+    assert.match(stdout, /appliedNodeIds: 2/);
+    assert.match(stdout, /stages:\n- apply-rebuild: completed \| Rebuild applied/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --render prints preview and structure report details", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__render.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        currentStageId: "render-preview",
+        renderedPreview: {
+          previewDataUrl: pngDataUrl("rendered-preview"),
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          capturedAt: "2026-03-23T12:20:00.000Z",
+        },
+        structureReport: {
+          targetFramePreserved: true,
+          imageFillNodeCount: 1,
+          textNodeCount: 4,
+          vectorNodeCount: 6,
+          inferredTextCount: 1,
+          passed: true,
+          issues: [],
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--render"], fixtureDir);
+    assert.match(stdout, /current stage: render-preview/);
+    assert.match(stdout, /renderedPreview: 160x100 \| image\/png/);
+    assert.match(
+      stdout,
+      /structureReport: passed=yes \| framePreserved=yes \| imageFillNodes=1 \| vectorNodes=6 \| textNodes=4 \| inferredText=1/,
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --measure prints diff metrics and acceptance gates", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__measure.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        currentStageId: "measure-diff",
+        diffScore: 0.91,
+        bestDiffScore: 0.91,
+        diffMetrics: {
+          globalSimilarity: 0.92,
+          colorDelta: 0.08,
+          edgeSimilarity: 0.9,
+          layoutSimilarity: 0.93,
+          structureSimilarity: 0.91,
+          hotspotAverage: 0.12,
+          hotspotPeak: 0.18,
+          hotspotCoverage: 0.2,
+          compositeScore: 0.91,
+          grade: "A",
+          acceptanceGates: [
+            {
+              id: "layout-gate",
+              label: "layoutSimilarity",
+              metric: "layoutSimilarity",
+              comparator: "gte",
+              threshold: 0.9,
+              actual: 0.93,
+              passed: true,
+              hard: true,
+            },
+            {
+              id: "color-gate",
+              label: "colorDelta",
+              metric: "colorDelta",
+              comparator: "lte",
+              threshold: 0.15,
+              actual: 0.08,
+              passed: true,
+              hard: false,
+            },
+          ],
+          hotspots: [],
+        },
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--measure"], fixtureDir);
+    assert.match(stdout, /current stage: measure-diff/);
+    assert.match(
+      stdout,
+      /diffMetrics: composite=0\.9100 grade=A global=0\.9200 layout=0\.9300 structure=0\.9100 edge=0\.9000 colorDelta=0\.0800 hotspotAvg=0\.1200 hotspotPeak=0\.1800 hotspotCoverage=0\.2000/,
+    );
+    assert.match(stdout, /acceptanceGates:/);
+    assert.match(stdout, /- \[pass\] layoutSimilarity: layoutSimilarity gte 0\.900 \(actual=0\.930 \| hard\)/);
+    assert.match(stdout, /- \[pass\] colorDelta: colorDelta lte 0\.150 \(actual=0\.080\)/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --refine prints terminal status and actionable suggestions", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-hybrid__refine.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        status: "completed",
+        loopStatus: "stopped",
+        stopReason: "target_reached",
+        currentStageId: "done",
+        refineSuggestions: [
+          {
+            id: "manual-review-1",
+            kind: "manual-review",
+            confidence: 0.92,
+            message: "当前结果已通过硬门槛。",
+            bounds: null,
+          },
+        ],
+        stages: [
+          {
+            stageId: "done",
+            status: "completed",
+            message: "Refine complete",
+            updatedAt: "2026-03-23T12:30:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--refine"], fixtureDir);
+    assert.match(stdout, /status: completed/);
+    assert.match(stdout, /loopStatus: stopped/);
+    assert.match(stdout, /stopReason: target_reached/);
+    assert.match(stdout, /current stage: done/);
+    assert.match(stdout, /refineSuggestions:\n- \[manual-review\] 当前结果已通过硬门槛。/);
+    assert.match(stdout, /stages:\n- done: completed \| Refine complete/);
+  });
+});
+
 test("plugin_bridge_cli rejects unsupported modes with a usage message", async () => {
   let failure: any = null;
   try {
