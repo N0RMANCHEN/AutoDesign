@@ -385,6 +385,44 @@ test("plugin_bridge_cli inspect exports subtree preview artifacts for a frame in
   });
 });
 
+test("plugin_bridge_cli reconstruct --list prints a friendly empty state when no jobs exist", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__reconstruction__jobs.json", {
+      jobs: [],
+    });
+
+    const { stdout } = await runCli(["reconstruct", "--list"], fixtureDir);
+    assert.match(stdout, /当前没有 reconstruction job。/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --list prints summary lines for existing jobs", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__reconstruction__jobs.json", {
+      jobs: [
+        {
+          id: "job_1",
+          status: "analysis_ready",
+          currentStageId: "analyze",
+          targetNode: { name: "Target Frame" },
+          referenceNode: { name: "Reference Screen" },
+        },
+        {
+          id: "job_2",
+          status: "refine_pending",
+          currentStageId: "measure",
+          targetNode: { name: "Detail Card" },
+          referenceNode: { name: "Reference Card" },
+        },
+      ],
+    });
+
+    const { stdout } = await runCli(["reconstruct", "--list"], fixtureDir);
+    assert.match(stdout, /job_1 \| analysis_ready \| Target Frame <= Reference Screen \| analyze/);
+    assert.match(stdout, /job_2 \| refine_pending \| Detail Card <= Reference Card \| measure/);
+  });
+});
+
 test("plugin_bridge_cli rejects unsupported modes with a usage message", async () => {
   let failure: any = null;
   try {
