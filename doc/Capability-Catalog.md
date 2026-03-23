@@ -574,8 +574,8 @@ type PluginCommandExecutionResult = {
 
 和这份文档直接对应的代码入口：
 
-- [shared/plugin-capabilities.ts](/Users/hirohi/AutoDesign/shared/plugin-capabilities.ts)
-- [shared/plugin-contract.ts](/Users/hirohi/AutoDesign/shared/plugin-contract.ts)
-- [shared/plugin-bridge.ts](/Users/hirohi/AutoDesign/shared/plugin-bridge.ts)
-- [shared/plugin-command-composer.ts](/Users/hirohi/AutoDesign/shared/plugin-command-composer.ts)
-- [plugins/autodesign/src/runtime/capability-runner.ts](/Users/hirohi/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)
+- [shared/plugin-capabilities.ts](/Users/BofeiChen/AutoDesign/shared/plugin-capabilities.ts)
+- [shared/plugin-contract.ts](/Users/BofeiChen/AutoDesign/shared/plugin-contract.ts)
+- [shared/plugin-bridge.ts](/Users/BofeiChen/AutoDesign/shared/plugin-bridge.ts)
+- [shared/plugin-command-composer.ts](/Users/BofeiChen/AutoDesign/shared/plugin-command-composer.ts)
+- [plugins/autodesign/src/runtime/capability-runner.ts](/Users/BofeiChen/AutoDesign/plugins/autodesign/src/runtime/capability-runner.ts)

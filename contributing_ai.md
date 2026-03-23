@@ -26,9 +26,15 @@
 1. `AGENT.md`
 2. `contributing_ai.md`
 3. `README.md`
-4. 本次任务直接相关的文档
+4. `doc/Architecture-Folder-Governance.md`
+5. `doc/Product-Standards.md`
+6. `doc/Test-Standards.md`
+7. `doc/Roadmap.md`
+8. 本次任务直接相关的 `doc/plans/*`、`reports/*` 与专题文档
 
 如果任务涉及 AI Prompt，额外阅读 `doc/ai/runtime/README.md` 与对应 action 文档。
+
+如果任务涉及 capability、reconstruction、插件写回或测试验收，不允许跳过第 4-7 步。
 
 ## 3. 非协商规则
 
@@ -97,6 +103,11 @@ find . -type f -name '*.md' | sort
 
 - `README.md`：项目定位、入口导航是否变化
 - `AGENT.md`：是否影响总原则
+- `doc/Product-Standards.md`：是否影响默认产品行为、设计质量或交付优先级
+- `doc/Test-Standards.md`：是否影响测试门槛或验收方式
+- `doc/Roadmap.md`：是否需要新增、关闭或改写 active work
+- `doc/plans/*`：active work 是否需要对应计划或计划是否已过期
+- `reports/*`：是否需要新增验收或质量证据
 - `doc/Architecture.md`：方案边界与实施路径是否变化
 - `doc/Architecture-Folder-Governance.md`：目录职责与文档治理是否变化
 - `doc/ai/runtime/*`：输入输出契约是否仍自洽
@@ -124,3 +135,10 @@ find . -type f -name '*.md' | sort
 - 关键引用已修复
 - 残留旧语义已清理
 - 验证结果已明确说明
+
+一次代码或工作流交付额外还应满足：
+
+- 如果属于 active work，`Roadmap` 已更新
+- 如需计划，`doc/plans/*` 已补齐
+- 如有验收或质量证据，已落到 `reports/*`
+- 对用户或工作流有意义的变化已更新 `CHANGELOG.md`

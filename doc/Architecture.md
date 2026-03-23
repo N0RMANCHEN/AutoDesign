@@ -2,133 +2,92 @@
 
 ## 1. 项目定位
 
-`AutoDesign` 是一个围绕 **Figma 设计信息**、**React 实现验证** 和 **AI 对 Figma 的可控写操作** 的联调工作仓库。
+`AutoDesign` 是一个围绕设计事实、前端实现验证和 AI 可控写 Figma 的联调仓库。
 
-它不是：
+它当前不承担：
 
-- 成品 SaaS
-- 通用型 Figma 插件市场产品
-- 一键生成完整前端的黑盒系统
-
-它当前的核心价值是：
-
-- 用本地插件让 Codex / Claude 直接操作 Figma
-- 用工作台把 Figma 设计事实整理成 React 改造输入
-- 用共享协议把这两条链路稳定连接起来
+- 成品 SaaS 的多用户和后端业务系统
+- 通用型插件市场产品
+- 一键生成生产级前端的黑盒流水线
 
 ## 2. 当前架构结论
 
-当前仓库采用 **双系统、共享模型**：
+仓库当前采用“双执行面、共享协议”的架构：
 
-- **Workspace System**
-  - 技术形态：Vite + React + 本地 Node API
-  - 职责：Figma-to-React 上下文整理、组件映射、Runtime Context Pack、本地 action 测试
-- **Plugin System**
-  - 技术形态：独立 Figma Plugin
-  - 职责：selection、preview、fill、style、variable 等写操作
-- **Bridge Runtime**
-  - 技术形态：本地 HTTP API + JSON 队列
-  - 职责：插件会话、命令队列、结果回传
-- **Shared Model**
-  - 技术形态：共享 TypeScript 类型与 JSON 协议
-  - 职责：统一能力定义、命令结构与桥接数据
+- Workspace System
+  - 形态：Vite + React + 本地 Node API
+  - 职责：设计信息整理、component mapping、review queue、Runtime Context Pack、局部前端改造支持
+- Plugin System
+  - 形态：独立 Figma Plugin
+  - 职责：selection、preview、capability 命令执行、Figma 写回
+- Bridge Runtime
+  - 形态：本地 HTTP API + 插件会话队列
+  - 职责：插件会话、命令编排、结果回传、reconstruction job orchestration
+- Shared Model
+  - 形态：共享 TypeScript 类型和 JSON contract
+  - 职责：统一能力定义、命令结构、bridge 数据模型、reconstruction 类型
 
 核心原则：
 
 - 共享协议
 - 不共享运行时
+- 工作台不直接写 Figma
+- 插件不承载工作台业务逻辑
 
 ## 3. 当前主执行链
 
-当前仓库真正写回 Figma 的主链是：
+### 3.1 AI -> Figma
 
-- **Figma Plugin API**
-- **本地 bridge**
+正式写回链路是：
 
-不是 MCP 直接执行写操作。
+1. CLI / bridge 发结构化命令
+2. 本地 bridge 把命令投递给在线插件会话
+3. 插件 runtime 执行 capability
+4. 结构化结果回传 bridge
 
-因此当前事实必须保持一致：
+这条链路的事实是：
 
-- 插件负责改 Figma
-- 工作台负责整理上下文
-- bridge 负责传输
+- Figma 写操作以 Plugin API 为准
+- MCP 可以辅助读取，但不是当前仓库的正式写回主链
 
-## 4. 核心分层
+### 3.2 Figma -> AI -> React
 
-### 4.1 Design Source
+当前主链仍是“上下文整理 + 受控改造”：
 
-来源于 Figma 和人工评审结论的设计事实：
+1. 从 Figma 提取设计事实
+2. 在工作台中映射 screen / component / runtime context
+3. 给 AI 生成更稳定的实现上下文
+4. 对 React / 前端代码做局部调整
 
-- 组件命名
-- 变体与状态
-- 布局关系
-- 设计备注
+## 4. 当前结构风险
 
-### 4.2 Mapping Rules
+仓库当前仍有这些架构风险，需要持续收敛：
 
-把设计信息翻译为实现约束：
+- `Roadmap`、能力目录、架构说明曾经相互混写，容易让事实漂移
+- reconstruction workflow 还在快速演化，server、plugin、CLI 三端约束需要持续收紧
+- 工作台、bridge、plugin 的职责边界虽然已经定义，但实现上仍需要补更多门禁和测试
+- 以本地 JSON 持久化为主的当前阶段适合验证，但不等于长期形态
 
-- 组件映射
-- props / state / event 约束
-- token 与布局规则
+## 5. 当前演进约束
 
-### 4.3 Workspace Runtime
+后续架构整改必须遵守：
 
-负责：
+- capability 变化先改 [Capability-Catalog.md](/Users/BofeiChen/AutoDesign/doc/Capability-Catalog.md)
+- 目录和职责变化先改 [Architecture-Folder-Governance.md](/Users/BofeiChen/AutoDesign/doc/Architecture-Folder-Governance.md)
+- 产品行为变化先改 [Product-Standards.md](/Users/BofeiChen/AutoDesign/doc/Product-Standards.md)
+- 测试门槛变化先改 [Test-Standards.md](/Users/BofeiChen/AutoDesign/doc/Test-Standards.md)
+- 活跃事项只在 [Roadmap.md](/Users/BofeiChen/AutoDesign/doc/Roadmap.md)
 
-- 设计源展示
-- component mapping
-- review queue
-- Runtime Context Pack
-
-当前实现：
-
-- `src/`
-- `server/`
-- `data/autodesign-project.json`
-
-### 4.4 Plugin Runtime
-
-负责：
-
-- 读取 selection
-- 导出 preview
-- 执行 capability 命令
-- 注册 bridge session
-
-当前实现：
-
-- `plugins/autodesign/src/main.ts`
-- `plugins/autodesign/src/runtime/`
-- `plugins/autodesign/src/ui.html`
-
-### 4.5 Command Contracts
-
-插件能力和命令体系的正式总表统一收口在：
-
-- [Capability-Catalog.md](/Users/hirohi/AutoDesign/doc/Capability-Catalog.md)
-
-### 4.6 AI Runtime Contracts
-
-AI 的 Prompt、action 文档和 JSON 契约统一收口在：
-
-- `doc/ai/`
-
-## 5. 当前目录布局
+## 6. 当前目录布局
 
 ```text
 .
 ├─ src/            # Vite + React workspace
-├─ server/         # local Node API
-├─ shared/         # shared types and contracts
-├─ plugins/        # packaged Figma executors
-├─ data/           # local JSON project storage
-└─ doc/            # documentation, roadmap, governance, AI contracts
+├─ server/         # local Node API + bridge + reconstruction orchestration
+├─ shared/         # shared contracts and types
+├─ plugins/        # Figma executors
+├─ scripts/        # CLI and local tooling
+├─ data/           # local JSON storage and previews
+├─ doc/            # governance, architecture, standards, roadmap, plans
+└─ reports/        # acceptance, quality, incidents, archive
 ```
-
-## 6. 当前风险点
-
-- 本地 JSON 持久化适合当前阶段，但未来切数据库需要额外抽象
-- 插件当前覆盖的是高频视觉写操作，尚未覆盖文本、Auto Layout、组件与实例
-- Figma-to-React 目前仍以上下文整理和映射验证为主，不等于完整代码生成系统
-
