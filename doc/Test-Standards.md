@@ -116,6 +116,7 @@
 - `reports/acceptance/*.md + *.json`
 - `reports/quality/*.md + *.json`
 - 报告 JSON 默认执行：`npm run check:report-schemas`
+- live 验收脚手架默认入口：`npm run acceptance:new`
 
 ## 3. 命名与结构规则
 

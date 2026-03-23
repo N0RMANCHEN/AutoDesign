@@ -23,6 +23,11 @@
 - [reports/quality/TEMPLATE.json](quality/TEMPLATE.json)
 - [reports/incidents/TEMPLATE.md](incidents/TEMPLATE.md)
 
+如果是新的 live 验收，优先生成脚手架而不是手写空白报告：
+
+- `npm run acceptance:new`
+- `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
+
 报告合同：
 
 - `reports/acceptance/*.md + *.json`
