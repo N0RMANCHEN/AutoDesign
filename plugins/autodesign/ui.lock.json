@@ -1,6 +1,6 @@
 {
   "source": "src/ui.html",
-  "sha256": "4ea8200a597ac325a93f409382fcb8469f3acc5b175af5a3f2492e362324fe33",
+  "sha256": "e55c6131a1183c8e39be67121e27f9fc9c3cbc2a04372f1f54e9f4184999d918",
   "policy": "Do not change plugin UI unless the user explicitly requests a UI change.",
-  "updatedAt": "2026-03-23T05:05:00.720Z"
+  "updatedAt": "2026-03-23T05:09:01.760Z"
 }
