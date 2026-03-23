@@ -1,0 +1,66 @@
+timestamp: 20260324-003356
+scenario: live-figma-bridge
+session: plugin_session_ha630yzf
+target: FigmaTest / Page 1
+status: online
+selectionCount: 2
+supportsExplicitNodeTargeting: yes
+snapshot: reports/acceptance/artifacts/20260324-003356/plugin-bridge-snapshot.json
+capabilities:
+- selection.refresh
+- nodes.inspect-subtree
+- fills.set-fill
+- fills.clear-fill
+- strokes.set-stroke
+- strokes.clear-stroke
+- strokes.set-weight
+- effects.set-shadow
+- effects.set-layer-blur
+- effects.clear-effects
+- geometry.set-radius
+- geometry.set-size
+- geometry.set-position
+- nodes.set-opacity
+- nodes.rename
+- nodes.duplicate
+- nodes.group
+- nodes.frame-selection
+- layout.configure-frame
+- layout.configure-child
+- nodes.create-frame
+- nodes.create-text
+- nodes.create-rectangle
+- nodes.create-ellipse
+- nodes.create-line
+- nodes.create-svg
+- assets.export-node-image
+- reconstruction.apply-raster-reference
+- nodes.delete
+- text.set-content
+- text.set-font-size
+- text.set-font-family
+- text.set-font-weight
+- text.set-text-color
+- text.set-line-height
+- text.set-letter-spacing
+- text.set-alignment
+- styles.upsert-text-style
+- nodes.set-clips-content
+- nodes.set-mask
+- components.create-component
+- components.create-instance
+- components.detach-instance
+- styles.apply-style
+- styles.detach-style
+- styles.upsert-paint-style
+- variables.upsert-color-variable
+- undo.undo-last
+selection:
+- [0] image 1 [RECTANGLE] id=4:99
+- [1] iPhone 17 - 1 [FRAME] id=8:30
+previewArtifacts:
+- reports/acceptance/artifacts/20260324-003356/0-image-1.png
+- reports/acceptance/artifacts/20260324-003356/1-iphone-17-1.png
+nextSuggestedSteps:
+- Confirm the plugin session remains online in Figma.
+- If the selection is correct, proceed with the live acceptance steps in the generated report.

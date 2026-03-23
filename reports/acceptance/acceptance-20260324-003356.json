@@ -1,0 +1,40 @@
+{
+  "kind": "acceptance_report",
+  "timestamp": "20260324-003356",
+  "status": "PASS",
+  "scope": "Live Figma / bridge acceptance",
+  "owner": "hirohi",
+  "scenario": "Validate plugin session registration, bridge online state, command dispatch and visible Figma writeback.",
+  "commands": [
+    "npm run plugin:status",
+    "npm run acceptance:prep -- --owner hirohi --session plugin_session_ha630yzf",
+    "npm run plugin:inspect -- --session plugin_session_ha630yzf --frame-node-id 8:30 --out reports/acceptance/artifacts/20260324-003356",
+    "npm run plugin:send -- --session plugin_session_ha630yzf --node-ids 8:30 --json '<COMMAND_BATCH>'"
+  ],
+  "steps": [
+    "Open Figma Desktop and launch the AutoDesign plugin in the target file.",
+    "Confirm npm run plugin:status reports an online session with the expected file and page.",
+    "Generate the acceptance report and preflight artifacts with the active session id.",
+    "Run one read-only inspect command against frame 8:30 and save the preview artifact.",
+    "Send a targeted mutating command that sets the frame stroke to #00FF88 at 2px, then verify the visible result in Figma.",
+    "Attempt a cleanup via undo.undo-last, observe the partial rollback, then clear the remaining stroke with strokes.clear-stroke."
+  ],
+  "observations": [
+    "plugin_session_ha630yzf stayed online during status -> acceptance:prep -> inspect -> send -> undo -> clear-stroke.",
+    "The targeted frame iPhone 17 - 1 (8:30) showed the expected visible green stroke after the writeback command.",
+    "The acceptance-only stroke was fully removed after the cleanup command, and the user confirmed the green outline disappeared from the canvas.",
+    "Finding: undo.undo-last only reverted strokes.set-weight from the two-capability batch and left strokes.set-stroke in place, so a targeted strokes.clear-stroke command was required to fully restore the frame."
+  ],
+  "artifacts": [
+    "reports/acceptance/acceptance-20260324-003356.md",
+    "reports/acceptance/acceptance-20260324-003356.json",
+    "reports/acceptance/artifacts/20260324-003356/plugin-bridge-snapshot.json",
+    "reports/acceptance/artifacts/20260324-003356/preflight-summary.txt",
+    "reports/acceptance/artifacts/20260324-003356/0-image-1.png",
+    "reports/acceptance/artifacts/20260324-003356/1-iphone-17-1.png",
+    "reports/acceptance/artifacts/20260324-003356/plugin_session_ha630yzf-frame-8-30-iphone-17-1.png"
+  ],
+  "follow_up": [
+    "Investigate undo.undo-last so a multi-capability batch can roll back atomically instead of only reverting the last capability result."
+  ]
+}
