@@ -20,6 +20,7 @@ import {
   exportNodeImageArtifact,
   getBoundFillVariableIds,
   getSelection,
+  inspectNodeSubtree,
   normalizeHex,
   supportsCornerRadius,
   supportsFills,
@@ -56,6 +57,7 @@ const CREATION_CAPABILITIES = new Set<string>([
   "nodes.create-ellipse",
   "nodes.create-line",
   "nodes.create-svg",
+  "components.create-instance",
   "nodes.duplicate",
   "nodes.group",
   "nodes.frame-selection",
@@ -99,8 +101,32 @@ function snapshotNodeProperties(
     case "nodes.set-opacity":
       if ("opacity" in node) props.opacity = node.opacity;
       break;
+    case "layout.configure-frame":
+      if ("layoutMode" in node) props.layoutMode = node.layoutMode;
+      if ("primaryAxisSizingMode" in node) props.primaryAxisSizingMode = node.primaryAxisSizingMode;
+      if ("counterAxisSizingMode" in node) props.counterAxisSizingMode = node.counterAxisSizingMode;
+      if ("primaryAxisAlignItems" in node) props.primaryAxisAlignItems = node.primaryAxisAlignItems;
+      if ("counterAxisAlignItems" in node) props.counterAxisAlignItems = node.counterAxisAlignItems;
+      if ("itemSpacing" in node) props.itemSpacing = node.itemSpacing;
+      if ("paddingLeft" in node) props.paddingLeft = node.paddingLeft;
+      if ("paddingRight" in node) props.paddingRight = node.paddingRight;
+      if ("paddingTop" in node) props.paddingTop = node.paddingTop;
+      if ("paddingBottom" in node) props.paddingBottom = node.paddingBottom;
+      if ("clipsContent" in node) props.clipsContent = node.clipsContent;
+      break;
+    case "layout.configure-child":
+      if ("layoutAlign" in node) props.layoutAlign = node.layoutAlign;
+      if ("layoutGrow" in node) props.layoutGrow = node.layoutGrow;
+      if ("layoutPositioning" in node) props.layoutPositioning = node.layoutPositioning;
+      break;
     case "nodes.rename":
       if ("name" in node) props.name = node.name;
+      break;
+    case "nodes.set-clips-content":
+      if ("clipsContent" in node) props.clipsContent = node.clipsContent;
+      break;
+    case "nodes.set-mask":
+      if ("isMask" in node) props.isMask = node.isMask;
       break;
     case "text.set-content":
       if ("characters" in node) props.characters = node.characters;
@@ -157,6 +183,7 @@ function successResult(
     createdStyleIds: [],
     createdVariableIds: [],
     exportedImages: [],
+    inspectedNodes: [],
     warnings: [],
     errorCode: null,
     message,
@@ -176,6 +203,7 @@ function failureResult(
     createdStyleIds: [],
     createdVariableIds: [],
     exportedImages: [],
+    inspectedNodes: [],
     warnings: [],
     errorCode: "capability_failed",
     message,
@@ -464,6 +492,14 @@ function supportsChildren(node: any) {
   return node && "children" in node && Array.isArray(node.children);
 }
 
+function supportsClipsContent(node: any) {
+  return node && "clipsContent" in node;
+}
+
+function supportsMasking(node: any) {
+  return node && "isMask" in node;
+}
+
 async function resolveParentNode(parentNodeId?: string): Promise<any> {
   if (!parentNodeId) {
     return figma.currentPage;
@@ -481,6 +517,95 @@ async function resolveParentNode(parentNodeId?: string): Promise<any> {
   }
 
   return node;
+}
+
+async function resolveComponentNode(componentNodeId: string): Promise<any> {
+  const node = await figma.getNodeByIdAsync(componentNodeId);
+  if (!node) {
+    throw new Error(`mainComponentNodeId "${componentNodeId}" 在当前文件中未找到。`);
+  }
+  if (node.type !== "COMPONENT") {
+    throw new Error(`mainComponentNodeId "${componentNodeId}" 不是 COMPONENT，当前为 ${node.type}。`);
+  }
+  return node;
+}
+
+function configureFrameLayout(
+  node: any,
+  payload: {
+    layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+    primaryAxisSizingMode?: "FIXED" | "AUTO";
+    counterAxisSizingMode?: "FIXED" | "AUTO";
+    primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
+    counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
+    itemSpacing?: number;
+    paddingLeft?: number;
+    paddingRight?: number;
+    paddingTop?: number;
+    paddingBottom?: number;
+    clipsContent?: boolean;
+  },
+) {
+  if (!node || !("layoutMode" in node)) {
+    throw new Error(`${node?.name || node?.id || "目标节点"} 不支持 Auto Layout。`);
+  }
+
+  if (payload.layoutMode) {
+    node.layoutMode = payload.layoutMode;
+  }
+  if (payload.primaryAxisSizingMode) {
+    node.primaryAxisSizingMode = payload.primaryAxisSizingMode;
+  }
+  if (payload.counterAxisSizingMode) {
+    node.counterAxisSizingMode = payload.counterAxisSizingMode;
+  }
+  if (payload.primaryAxisAlignItems) {
+    node.primaryAxisAlignItems = payload.primaryAxisAlignItems;
+  }
+  if (payload.counterAxisAlignItems) {
+    node.counterAxisAlignItems = payload.counterAxisAlignItems;
+  }
+  if (payload.itemSpacing !== undefined) {
+    if (!Number.isFinite(payload.itemSpacing)) {
+      throw new Error("itemSpacing 必须是有效数字。");
+    }
+    node.itemSpacing = Number(payload.itemSpacing);
+  }
+  for (const key of ["paddingLeft", "paddingRight", "paddingTop", "paddingBottom"] as const) {
+    const value = payload[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (!Number.isFinite(value) || Number(value) < 0) {
+      throw new Error(`${key} 必须是大于等于 0 的数字。`);
+    }
+    node[key] = Number(value);
+  }
+  if (payload.clipsContent !== undefined && supportsClipsContent(node)) {
+    node.clipsContent = Boolean(payload.clipsContent);
+  }
+}
+
+function configureChildLayout(
+  node: any,
+  payload: {
+    layoutAlign?: "INHERIT" | "STRETCH" | "MIN" | "CENTER" | "MAX";
+    layoutGrow?: number;
+    layoutPositioning?: "AUTO" | "ABSOLUTE";
+  },
+) {
+  if (payload.layoutAlign && "layoutAlign" in node) {
+    node.layoutAlign = payload.layoutAlign;
+  }
+  if (payload.layoutGrow !== undefined && "layoutGrow" in node) {
+    if (!Number.isFinite(payload.layoutGrow) || Number(payload.layoutGrow) < 0) {
+      throw new Error("layoutGrow 必须是大于等于 0 的数字。");
+    }
+    node.layoutGrow = Number(payload.layoutGrow);
+  }
+  if (payload.layoutPositioning && "layoutPositioning" in node) {
+    node.layoutPositioning = payload.layoutPositioning;
+  }
 }
 
 function renameNode(node: any, name: string) {
@@ -655,6 +780,17 @@ function parentUsesAutoLayout(parent: any) {
   return "layoutMode" in parent && typeof parent.layoutMode === "string" && parent.layoutMode !== "NONE";
 }
 
+function hasExplicitCreationParent(command: FigmaCapabilityCommand) {
+  if (!CREATION_CAPABILITIES.has(command.capabilityId)) {
+    return false;
+  }
+  const payload =
+    command.payload && typeof command.payload === "object"
+      ? (command.payload as { parentNodeId?: unknown })
+      : null;
+  return typeof payload?.parentNodeId === "string" && payload.parentNodeId.trim().length > 0;
+}
+
 async function resolveAnchorNodeForCreation(command: FigmaCapabilityCommand) {
   if (!command.nodeIds || command.nodeIds.length === 0) {
     throw new Error(
@@ -709,6 +845,42 @@ function computeRelativePlacement(
         y: anchorBounds.y,
       };
   }
+}
+
+function computeRasterPlacement(
+  targetWidth: number,
+  targetHeight: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  fitMode: "cover" | "contain" | "stretch",
+) {
+  if (fitMode === "stretch") {
+    return {
+      x: 0,
+      y: 0,
+      width: Math.max(1, Math.round(targetWidth)),
+      height: Math.max(1, Math.round(targetHeight)),
+      scaleMode: "FILL" as const,
+    };
+  }
+
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = targetWidth / targetHeight;
+  const useContain =
+    fitMode === "contain"
+      ? sourceAspect > targetAspect
+      : sourceAspect < targetAspect;
+
+  const width = useContain ? targetWidth : targetHeight * sourceAspect;
+  const height = useContain ? targetWidth / sourceAspect : targetHeight;
+
+  return {
+    x: Math.round((targetWidth - width) / 2),
+    y: Math.round((targetHeight - height) / 2),
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+    scaleMode: "FILL" as const,
+  };
 }
 
 function groupNodes(nodes: any[], name?: string) {
@@ -1229,6 +1401,7 @@ async function runCapabilityCommand(
   if (
     batchSource === "codex" &&
     requiresExplicitNodeIdsForExternalCapability(command.capabilityId) &&
+    !hasExplicitCreationParent(command) &&
     (!command.nodeIds || command.nodeIds.length === 0)
   ) {
     throw new Error(`外部修改命令必须指定 nodeIds。capability=${command.capabilityId}。`);
@@ -1281,6 +1454,27 @@ async function runCapabilityCommandInner(
   switch (command.capabilityId) {
     case "selection.refresh":
       return successResult(command.capabilityId, "已刷新当前 selection。");
+
+    case "nodes.inspect-subtree": {
+      const payload = command.payload as { nodeId: string; maxDepth?: number };
+      const nodeId = String(payload.nodeId || "").trim();
+      if (!nodeId) {
+        throw new Error("inspect-subtree 需要 nodeId。");
+      }
+      let root: any = null;
+      try {
+        root = await figma.getNodeByIdAsync(nodeId);
+      } catch {
+        root = null;
+      }
+      if (!root) {
+        throw new Error(`未找到节点: ${nodeId}`);
+      }
+      const inspectedNodes = inspectNodeSubtree(root, { maxDepth: payload.maxDepth });
+      return successResult(command.capabilityId, `已检查节点子树 "${root.name || root.id}"。`, {
+        inspectedNodes,
+      });
+    }
 
     case "fills.set-fill": {
       const payload = command.payload as { hex: string };
@@ -1723,6 +1917,46 @@ async function runCapabilityCommandInner(
       );
     }
 
+    case "layout.configure-frame": {
+      const payload = command.payload as {
+        layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+        primaryAxisSizingMode?: "FIXED" | "AUTO";
+        counterAxisSizingMode?: "FIXED" | "AUTO";
+        primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
+        counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
+        itemSpacing?: number;
+        paddingLeft?: number;
+        paddingRight?: number;
+        paddingTop?: number;
+        paddingBottom?: number;
+        clipsContent?: boolean;
+      };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        configureFrameLayout(node, payload);
+        changedNodeIds.push(node.id);
+      }
+      return successResult(command.capabilityId, `已配置 ${changedNodeIds.length} 个 Frame 的布局属性。`, {
+        changedNodeIds,
+      });
+    }
+
+    case "layout.configure-child": {
+      const payload = command.payload as {
+        layoutAlign?: "INHERIT" | "STRETCH" | "MIN" | "CENTER" | "MAX";
+        layoutGrow?: number;
+        layoutPositioning?: "AUTO" | "ABSOLUTE";
+      };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        configureChildLayout(node, payload);
+        changedNodeIds.push(node.id);
+      }
+      return successResult(command.capabilityId, `已配置 ${changedNodeIds.length} 个子节点的布局属性。`, {
+        changedNodeIds,
+      });
+    }
+
     case "assets.export-node-image": {
       const payload = command.payload as {
         format?: "PNG";
@@ -1761,13 +1995,23 @@ async function runCapabilityCommandInner(
 
     case "reconstruction.apply-raster-reference": {
       const payload = command.payload as {
-        referenceNodeId: string;
+        referenceNodeId?: string;
+        referenceDataUrl?: string;
         resultName?: string;
         replaceTargetContents?: boolean;
         resizeTargetToReference?: boolean;
+        fitMode?: "cover" | "contain" | "stretch";
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        opacity?: number;
       };
-      if (!payload.referenceNodeId || !payload.referenceNodeId.trim()) {
-        throw new Error("referenceNodeId 不能为空。");
+      if (
+        !(typeof payload.referenceNodeId === "string" && payload.referenceNodeId.trim()) &&
+        !(typeof payload.referenceDataUrl === "string" && payload.referenceDataUrl.trim())
+      ) {
+        throw new Error("referenceNodeId 或 referenceDataUrl 至少需要一个。");
       }
 
       const targets = await getTargetNodes(command, batchSource);
@@ -1780,17 +2024,31 @@ async function runCapabilityCommandInner(
         throw new Error(`raster reconstruction 目标节点必须是 FRAME，当前为 ${target.type}。`);
       }
 
-      const referenceNode = await figma.getNodeByIdAsync(payload.referenceNodeId);
-      if (!referenceNode) {
-        throw new Error(`referenceNodeId "${payload.referenceNodeId}" 未找到。`);
-      }
-
-      const artifact = await exportNodeImageArtifact(referenceNode, {
-        preferOriginalBytes: true,
-      });
-      if (!artifact) {
-        throw new Error("参考节点无法导出为图片。");
-      }
+      const artifact =
+        typeof payload.referenceDataUrl === "string" && payload.referenceDataUrl.trim()
+          ? (() => {
+              const { bytes, mimeType } = decodeDataUrl(payload.referenceDataUrl as string);
+              return {
+                dataUrl: payload.referenceDataUrl as string,
+                bytes,
+                mimeType,
+                width: Number.isFinite(payload.width) ? Number(payload.width) : target.width,
+                height: Number.isFinite(payload.height) ? Number(payload.height) : target.height,
+              };
+            })()
+          : await (async () => {
+              const referenceNode = await figma.getNodeByIdAsync(String(payload.referenceNodeId));
+              if (!referenceNode) {
+                throw new Error(`referenceNodeId "${payload.referenceNodeId}" 未找到。`);
+              }
+              const exported = await exportNodeImageArtifact(referenceNode, {
+                preferOriginalBytes: true,
+              });
+              if (!exported) {
+                throw new Error("参考节点无法导出为图片。");
+              }
+              return exported;
+            })();
 
       if (payload.replaceTargetContents !== false && supportsChildren(target)) {
         for (const child of [...target.children]) {
@@ -1805,17 +2063,39 @@ async function runCapabilityCommandInner(
         target.resize(artifact.width, artifact.height);
       }
 
-      const { bytes } = decodeDataUrl(artifact.dataUrl);
-      const image = figma.createImage(bytes);
+      const image = figma.createImage(
+        "bytes" in artifact && artifact.bytes ? artifact.bytes : decodeDataUrl(artifact.dataUrl).bytes,
+      );
       const rasterNode = figma.createRectangle();
       target.appendChild(rasterNode);
       rasterNode.name = payload.resultName?.trim() || "AD Raster";
-      rasterNode.resize(
-        Math.max(1, Math.round(typeof target.width === "number" ? target.width : artifact.width)),
-        Math.max(1, Math.round(typeof target.height === "number" ? target.height : artifact.height)),
-      );
-      rasterNode.x = 0;
-      rasterNode.y = 0;
+      const targetWidth = Math.max(1, Math.round(typeof target.width === "number" ? target.width : artifact.width));
+      const targetHeight = Math.max(1, Math.round(typeof target.height === "number" ? target.height : artifact.height));
+      const fitMode = payload.fitMode || "cover";
+      const hasExplicitBounds =
+        Number.isFinite(payload.x) &&
+        Number.isFinite(payload.y) &&
+        Number.isFinite(payload.width) &&
+        Number.isFinite(payload.height);
+      const placement = hasExplicitBounds
+        ? {
+            x: Math.round(Number(payload.x)),
+            y: Math.round(Number(payload.y)),
+            width: Math.max(1, Math.round(Number(payload.width))),
+            height: Math.max(1, Math.round(Number(payload.height))),
+            scaleMode: "FILL" as const,
+          }
+        : computeRasterPlacement(
+            targetWidth,
+            targetHeight,
+            Math.max(1, Number(artifact.width || targetWidth)),
+            Math.max(1, Number(artifact.height || targetHeight)),
+            fitMode,
+          );
+
+      rasterNode.resize(placement.width, placement.height);
+      rasterNode.x = placement.x;
+      rasterNode.y = placement.y;
       if ("strokes" in rasterNode) {
         rasterNode.strokes = [];
       }
@@ -1832,9 +2112,12 @@ async function runCapabilityCommandInner(
         {
           type: "IMAGE",
           imageHash: image.hash,
-          scaleMode: "FILL",
+          scaleMode: placement.scaleMode,
           visible: true,
-          opacity: 1,
+          opacity:
+            Number.isFinite(payload.opacity) && Number(payload.opacity) >= 0 && Number(payload.opacity) <= 1
+              ? Number(payload.opacity)
+              : 1,
         },
       ];
 
@@ -1885,6 +2168,94 @@ async function runCapabilityCommandInner(
         `已删除 ${changedNodeIds.length} 个节点。`,
         { changedNodeIds, warnings },
       );
+    }
+
+    case "nodes.set-clips-content": {
+      const payload = command.payload as { value: boolean };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        if (!supportsClipsContent(node)) {
+          throw new Error(`${node.name || node.id} 不支持 clipsContent。`);
+        }
+        node.clipsContent = Boolean(payload.value);
+        changedNodeIds.push(node.id);
+      }
+      return successResult(command.capabilityId, `已更新 ${changedNodeIds.length} 个节点的 clipsContent。`, {
+        changedNodeIds,
+      });
+    }
+
+    case "nodes.set-mask": {
+      const payload = command.payload as { value: boolean };
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        if (!supportsMasking(node)) {
+          throw new Error(`${node.name || node.id} 不支持 mask。`);
+        }
+        node.isMask = Boolean(payload.value);
+        changedNodeIds.push(node.id);
+      }
+      return successResult(command.capabilityId, `已更新 ${changedNodeIds.length} 个节点的 mask 状态。`, {
+        changedNodeIds,
+      });
+    }
+
+    case "components.create-component": {
+      const payload = command.payload as { name?: string };
+      const targets = await getTargetNodes(command, batchSource);
+      if (targets.length !== 1) {
+        throw new Error("create-component 需要且仅支持一个目标节点。");
+      }
+      const component = figma.createComponentFromNode(targets[0]);
+      if (payload.name && payload.name.trim()) {
+        component.name = payload.name.trim();
+      }
+      return successResult(command.capabilityId, `已创建组件 "${component.name}"。`, {
+        changedNodeIds: [component.id],
+      });
+    }
+
+    case "components.create-instance": {
+      const payload = command.payload as {
+        mainComponentNodeId: string;
+        x?: number;
+        y?: number;
+        parentNodeId?: string;
+        name?: string;
+      };
+      if (!String(payload.mainComponentNodeId || "").trim()) {
+        throw new Error("components.create-instance 需要 mainComponentNodeId。");
+      }
+      const component = await resolveComponentNode(String(payload.mainComponentNodeId));
+      const parent = await resolveParentNode(payload.parentNodeId);
+      const instance = component.createInstance();
+      parent.appendChild(instance);
+      if (payload.name && payload.name.trim()) {
+        instance.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.x)) {
+        instance.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        instance.y = Number(payload.y);
+      }
+      return successResult(command.capabilityId, `已创建组件实例 "${instance.name}"。`, {
+        changedNodeIds: [instance.id],
+      });
+    }
+
+    case "components.detach-instance": {
+      const changedNodeIds: string[] = [];
+      for (const node of await getTargetNodes(command, batchSource)) {
+        if (node.type !== "INSTANCE" || typeof node.detachInstance !== "function") {
+          throw new Error(`${node.name || node.id} 不是可 detach 的实例节点。`);
+        }
+        const detached = node.detachInstance();
+        changedNodeIds.push(detached.id);
+      }
+      return successResult(command.capabilityId, `已 detach ${changedNodeIds.length} 个实例。`, {
+        changedNodeIds,
+      });
     }
 
     case "nodes.create-frame": {

@@ -22,6 +22,7 @@ export type ReconstructionApplyStatus = "not_applied" | "applied";
 export type ReconstructionLoopStatus = "idle" | "running" | "stopped";
 export type ReconstructionStrategy =
   | "vector-reconstruction"
+  | "hybrid-reconstruction"
   | "raster-exact"
   | "structural-preview";
 export type ReconstructionAnalysisProvider =
@@ -84,6 +85,7 @@ export type ReconstructionCanonicalFrame = {
   fixedTargetFrame: boolean;
   deprojected: boolean;
   mappingMode: "extend" | "reflow" | "center";
+  sourceQuad?: ReconstructionPoint[];
 };
 
 export type ReconstructionRegion = {
@@ -257,7 +259,7 @@ export type ReconstructionApprovedAssetChoice = {
 };
 
 export type ReconstructionPlan = {
-  previewOnly: true;
+  previewOnly: boolean;
   summary: string[];
   ops: FigmaCapabilityCommand[];
 };
@@ -276,11 +278,31 @@ export type ReconstructionDiffHotspot = {
   bounds: ReconstructionBounds;
 };
 
+export type ReconstructionAcceptanceGate = {
+  id: string;
+  label: string;
+  metric: string;
+  comparator: "gte" | "lte";
+  threshold: number;
+  actual: number;
+  passed: boolean;
+  hard: boolean;
+};
+
+export type ReconstructionDiffGrade = "A" | "B" | "C" | "D" | "F";
+
 export type ReconstructionDiffMetrics = {
   globalSimilarity: number;
   colorDelta: number;
   edgeSimilarity: number;
   layoutSimilarity: number;
+  structureSimilarity: number;
+  hotspotAverage: number;
+  hotspotPeak: number;
+  hotspotCoverage: number;
+  compositeScore: number;
+  grade: ReconstructionDiffGrade;
+  acceptanceGates: ReconstructionAcceptanceGate[];
   hotspots: ReconstructionDiffHotspot[];
 };
 
@@ -385,6 +407,8 @@ export type ReconstructionContextPack = {
   currentFontMatches: ReconstructionFontMatch[];
   currentReviewFlags: ReconstructionReviewFlag[];
   currentWarnings: string[];
+  workflow: string[];
+  scoringRubric: string[];
   guidance: string[];
 };
 

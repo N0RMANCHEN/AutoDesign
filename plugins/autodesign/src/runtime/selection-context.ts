@@ -1,4 +1,8 @@
-import type { PluginImageArtifact, PluginNodeSummary } from "../../../../shared/plugin-bridge.js";
+import type {
+  PluginImageArtifact,
+  PluginNodeInspection,
+  PluginNodeSummary,
+} from "../../../../shared/plugin-bridge.js";
 
 const FILL_CAPABLE_TYPES = new Set([
   "BOOLEAN_OPERATION",
@@ -207,6 +211,224 @@ export function nodeSummary(node: any): PluginNodeSummary {
     layoutPositioning: readLayoutPositioning(node),
     hasImageFill: Boolean(findImagePaint(node)),
   };
+}
+
+function readOpacity(node: any) {
+  return typeof node?.opacity === "number" ? node.opacity : null;
+}
+
+function readRotation(node: any) {
+  return typeof node?.rotation === "number" ? node.rotation : null;
+}
+
+function strokeSummary(node: any) {
+  if (!supportsStrokes(node)) {
+    return [];
+  }
+  if (node.strokes === figma.mixed) {
+    return ["mixed"];
+  }
+  return Array.isArray(node.strokes)
+    ? node.strokes.map((paint: any) => {
+        if (!paint || paint.type !== "SOLID") {
+          return paint?.type ? String(paint.type).toLowerCase() : "unknown";
+        }
+        return rgbToHex(paint.color);
+      })
+    : [];
+}
+
+function readCornerRadius(node: any) {
+  return supportsCornerRadius(node) && typeof node.cornerRadius === "number"
+    ? node.cornerRadius
+    : null;
+}
+
+function readBooleanProperty(node: any, key: string) {
+  return typeof node?.[key] === "boolean" ? node[key] : null;
+}
+
+function readNumericProperty(node: any, key: string) {
+  return typeof node?.[key] === "number" ? node[key] : null;
+}
+
+function readStringProperty(node: any, key: string) {
+  return typeof node?.[key] === "string" ? node[key] : null;
+}
+
+function readConstraints(node: any) {
+  if (!node || !node.constraints || typeof node.constraints !== "object") {
+    return {
+      horizontal: null,
+      vertical: null,
+    };
+  }
+  return {
+    horizontal: typeof node.constraints.horizontal === "string" ? node.constraints.horizontal : null,
+    vertical: typeof node.constraints.vertical === "string" ? node.constraints.vertical : null,
+  };
+}
+
+function readMainComponentInfo(node: any) {
+  if (!node || !("mainComponent" in node) || !node.mainComponent) {
+    return {
+      id: null,
+      name: null,
+    };
+  }
+  return {
+    id: typeof node.mainComponent.id === "string" ? node.mainComponent.id : null,
+    name: typeof node.mainComponent.name === "string" ? node.mainComponent.name : null,
+  };
+}
+
+function readKeyList(record: unknown) {
+  if (!record || typeof record !== "object") {
+    return [];
+  }
+  return Object.keys(record as Record<string, unknown>).sort();
+}
+
+function readVariantProperties(node: any) {
+  if (!node || !node.variantProperties || typeof node.variantProperties !== "object") {
+    return undefined;
+  }
+  const entries = Object.entries(node.variantProperties as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+  );
+  if (!entries.length) {
+    return undefined;
+  }
+  return Object.fromEntries(entries.sort((left, right) => left[0].localeCompare(right[0])));
+}
+
+function readTextContent(node: any) {
+  return typeof node?.characters === "string" ? node.characters : null;
+}
+
+function readFontInfo(node: any) {
+  if (!node || !("fontName" in node) || node.fontName === figma.mixed || !node.fontName) {
+    return {
+      family: null,
+      style: null,
+      weight: null,
+    };
+  }
+  const family = typeof node.fontName.family === "string" ? node.fontName.family : null;
+  const style = typeof node.fontName.style === "string" ? node.fontName.style : null;
+  let weight: number | string | null = null;
+  if (style) {
+    const normalized = style.toLowerCase();
+    if (normalized.includes("extra bold")) weight = 800;
+    else if (normalized.includes("bold")) weight = 700;
+    else if (normalized.includes("semi")) weight = 600;
+    else if (normalized.includes("medium")) weight = 500;
+    else if (normalized.includes("light")) weight = 300;
+    else weight = style;
+  }
+  return { family, style, weight };
+}
+
+function readTextMetric(node: any, key: "fontSize" | "lineHeight" | "letterSpacing") {
+  if (!node || !(key in node)) {
+    return null;
+  }
+  const value = node[key];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (value && typeof value === "object" && typeof value.value === "number") {
+    return value.value;
+  }
+  return null;
+}
+
+function isReconstructionGeneratedNode(node: any) {
+  const name = typeof node?.name === "string" ? node.name : "";
+  return (
+    name.startsWith("AD Vector/") ||
+    name.startsWith("AD Hybrid/") ||
+    name.startsWith("AD Rebuild/")
+  );
+}
+
+export function inspectNodeSubtree(root: any, options?: { maxDepth?: number }) {
+  const maxDepth = Number.isFinite(options?.maxDepth) ? Math.max(0, Math.floor(options!.maxDepth!)) : 6;
+  const inspected: PluginNodeInspection[] = [];
+
+  const visit = (node: any, depth: number) => {
+    const parent = getParentNode(node);
+    const siblings =
+      parent && "children" in parent && Array.isArray(parent.children) ? parent.children : null;
+    const indexWithinParent =
+      siblings && typeof siblings.findIndex === "function"
+        ? siblings.findIndex((candidate: any) => candidate?.id === node.id)
+        : -1;
+    const fontInfo = readFontInfo(node);
+    const constraints = readConstraints(node);
+    const mainComponent = readMainComponentInfo(node);
+    const summary = nodeSummary(node);
+    inspected.push({
+      ...summary,
+      depth,
+      childCount:
+        "children" in node && Array.isArray(node.children) ? node.children.length : 0,
+      indexWithinParent: indexWithinParent >= 0 ? indexWithinParent : 0,
+      visible: typeof node?.visible === "boolean" ? node.visible : null,
+      locked: typeof node?.locked === "boolean" ? node.locked : null,
+      opacity: readOpacity(node),
+      rotation: readRotation(node),
+      strokes: strokeSummary(node),
+      strokeStyleId:
+        supportsStrokes(node) && typeof node.strokeStyleId === "string" && node.strokeStyleId
+          ? node.strokeStyleId
+          : null,
+      cornerRadius: readCornerRadius(node),
+      clipsContent: readBooleanProperty(node, "clipsContent"),
+      isMask: readBooleanProperty(node, "isMask"),
+      maskType: readStringProperty(node, "maskType"),
+      constraintsHorizontal: constraints.horizontal,
+      constraintsVertical: constraints.vertical,
+      layoutGrow: readNumericProperty(node, "layoutGrow"),
+      layoutAlign: readStringProperty(node, "layoutAlign"),
+      layoutSizingHorizontal: readStringProperty(node, "layoutSizingHorizontal"),
+      layoutSizingVertical: readStringProperty(node, "layoutSizingVertical"),
+      primaryAxisSizingMode: readStringProperty(node, "primaryAxisSizingMode"),
+      counterAxisSizingMode: readStringProperty(node, "counterAxisSizingMode"),
+      primaryAxisAlignItems: readStringProperty(node, "primaryAxisAlignItems"),
+      counterAxisAlignItems: readStringProperty(node, "counterAxisAlignItems"),
+      itemSpacing: readNumericProperty(node, "itemSpacing"),
+      paddingLeft: readNumericProperty(node, "paddingLeft"),
+      paddingRight: readNumericProperty(node, "paddingRight"),
+      paddingTop: readNumericProperty(node, "paddingTop"),
+      paddingBottom: readNumericProperty(node, "paddingBottom"),
+      textContent: readTextContent(node),
+      fontFamily: fontInfo.family,
+      fontStyle: fontInfo.style,
+      fontWeight: fontInfo.weight,
+      fontSize: readTextMetric(node, "fontSize"),
+      lineHeight: readTextMetric(node, "lineHeight"),
+      letterSpacing: readTextMetric(node, "letterSpacing"),
+      textAlignment:
+        typeof node?.textAlignHorizontal === "string" ? node.textAlignHorizontal : null,
+      mainComponentId: mainComponent.id,
+      mainComponentName: mainComponent.name,
+      componentPropertyReferences: readKeyList(node?.componentPropertyReferences),
+      componentPropertyDefinitionKeys: readKeyList(node?.componentPropertyDefinitions),
+      variantProperties: readVariantProperties(node),
+      generatedBy: isReconstructionGeneratedNode(node) ? "reconstruction" : null,
+    });
+
+    if (depth >= maxDepth || !("children" in node) || !Array.isArray(node.children)) {
+      return;
+    }
+    for (const child of node.children) {
+      visit(child, depth + 1);
+    }
+  };
+
+  visit(root, 0);
+  return inspected;
 }
 
 function bytesToBase64(bytes: Uint8Array) {

@@ -99,4 +99,24 @@ ensure(
   "Relative rectangle creation must carry the anchor nodeId for external dispatch.",
 );
 
+const externalBatchWithPerCommandTargets = prepareBatchForExternalDispatch(
+  {
+    source: "user",
+    commands: [
+      {
+        type: "capability",
+        capabilityId: "fills.set-fill",
+        payload: { hex: "#333333" },
+        nodeIds: ["9:9"],
+      },
+    ],
+  },
+  ["1:2"],
+);
+ensure(
+  externalBatchWithPerCommandTargets.commands[0].type === "capability" &&
+    externalBatchWithPerCommandTargets.commands[0].nodeIds?.[0] === "9:9",
+  "Per-command nodeIds must be preserved during external dispatch preparation.",
+);
+
 console.log("plugin targeting verified");

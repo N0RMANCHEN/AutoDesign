@@ -1,20 +1,27 @@
+import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import {
   composePluginCommandsFromPrompt,
   type PluginCommandComposition,
 } from "../shared/plugin-command-composer.js";
 import type {
+  InspectFrameResponsePayload,
   PluginBridgeSession,
   PluginBridgeSnapshot,
+  PluginNodeInspection,
   QueuePluginCommandPayload,
 } from "../shared/plugin-bridge.js";
 import type { FigmaPluginCommandBatch } from "../shared/plugin-contract.js";
 import {
   collectCapabilityIds,
   collectMutatingCapabilityIds,
+  normalizeLegacyCommandForExternalDispatch,
   prepareBatchForExternalDispatch,
+  requiresExplicitNodeIdsForExternalCapability,
 } from "../shared/plugin-targeting.js";
 import type {
   ApproveReconstructionPlanPayload,
@@ -22,6 +29,7 @@ import type {
   ReconstructionContextPack,
   ReconstructionJob,
   ReconstructionJobSnapshot,
+  ReconstructionPoint,
   SubmitReconstructionAnalysisPayload,
   ReviewReconstructionAssetPayload,
   ReviewReconstructionFontPayload,
@@ -31,6 +39,74 @@ const BASE_URL =
   process.env.AUTODESIGN_API_URL ??
   process.env.FIGMATEST_API_URL ??
   "http://localhost:3001";
+const execFileAsync = promisify(execFile);
+
+type EstimatedScreenQuad = {
+  rotationDegrees: number;
+  rotatedBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    density: number;
+  };
+  sourceQuadPixels: ReconstructionPoint[];
+  debug?: {
+    originalOverlayPath?: string;
+    rotatedOverlayPath?: string;
+  };
+};
+
+type PreviewHeuristicAnalysis = {
+  width: number;
+  height: number;
+  dominantColors?: string[];
+  layoutRegions?: Array<{
+    id?: string;
+    kind?: string;
+    confidence?: number;
+    bounds?: { x: number; y: number; width: number; height: number };
+    fillHex?: string | null;
+  }>;
+  textCandidates?: Array<{
+    id?: string;
+    confidence?: number;
+    bounds?: { x: number; y: number; width: number; height: number };
+    estimatedRole?: "headline" | "body" | "metric" | "label" | "unknown";
+  }>;
+  textStyleHints?: Array<{
+    textCandidateId?: string;
+    role?: "headline" | "body" | "metric" | "label" | "unknown";
+    fontCategory?: string;
+    fontWeightGuess?: number | null;
+    fontSizeEstimate?: number | null;
+    colorHex?: string | null;
+    alignmentGuess?: "left" | "center" | "right" | "justified" | "unknown";
+    lineHeightEstimate?: number | null;
+    letterSpacingEstimate?: number | null;
+    confidence?: number;
+  }>;
+  assetCandidates?: unknown[];
+  styleHints?: {
+    theme?: "light" | "dark";
+    cornerRadiusHint?: number;
+    shadowHint?: "none" | "soft";
+    primaryColorHex?: string | null;
+    accentColorHex?: string | null;
+  };
+  uncertainties?: string[];
+};
+
+type VisionOcrLine = {
+  text: string;
+  confidence: number;
+  bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
 
 type Mode = "status" | "send" | "preview" | "inspect" | "reconstruct";
 type PreviewTarget = {
@@ -201,6 +277,34 @@ function parseNodeIds(nodeIdsRaw: string | null) {
   return nodeIdsRaw.split(",").map((id) => id.trim()).filter(Boolean);
 }
 
+function parseReconstructionStrategy(argv: string[]): CreateReconstructionJobPayload["strategy"] {
+  const explicit = readFlag(argv, "--strategy");
+  if (
+    explicit === "vector-reconstruction" ||
+    explicit === "hybrid-reconstruction" ||
+    explicit === "raster-exact" ||
+    explicit === "structural-preview"
+  ) {
+    return explicit;
+  }
+  if (argv.includes("--hybrid")) {
+    return "hybrid-reconstruction";
+  }
+  if (argv.includes("--raster-exact")) {
+    return "raster-exact";
+  }
+  if (argv.includes("--vector-reconstruction")) {
+    return "vector-reconstruction";
+  }
+  if (argv.includes("--structural-preview")) {
+    return "structural-preview";
+  }
+  if (explicit) {
+    fail(`不支持的 reconstruction strategy: ${explicit}`);
+  }
+  return undefined;
+}
+
 function formatSelectionForTargeting(session: PluginBridgeSession) {
   if (!session.selection.length) {
     return "当前 selection 为空。";
@@ -219,7 +323,12 @@ function ensureExplicitTargetingForMutations(
   session: PluginBridgeSession,
   nodeIds: string[],
 ) {
-  const mutatingCapabilityIds = collectMutatingCapabilityIds(batch);
+  const normalizedCommands = batch.commands.map((command) =>
+    normalizeLegacyCommandForExternalDispatch(command),
+  );
+  const mutatingCapabilityIds = normalizedCommands
+    .map((command) => command.capabilityId)
+    .filter((capabilityId) => requiresExplicitNodeIdsForExternalCapability(capabilityId));
   if (!mutatingCapabilityIds.length) {
     return;
   }
@@ -228,14 +337,117 @@ function ensureExplicitTargetingForMutations(
     fail("目标插件当前不支持显式 nodeIds 定向，已拒绝发送修改类外部命令。");
   }
 
-  if (!nodeIds.length) {
+  const missingExplicitTargets = normalizedCommands.filter(
+    (command) =>
+      requiresExplicitNodeIdsForExternalCapability(command.capabilityId) &&
+      (!Array.isArray(command.nodeIds) || command.nodeIds.length === 0),
+  );
+
+  if (!nodeIds.length && missingExplicitTargets.length) {
     fail(
       [
         `修改类外部命令必须提供 --node-ids。涉及能力：${mutatingCapabilityIds.join(", ")}`,
+        "如果使用 --json，也可以直接在每条 capability command 上显式提供 nodeIds。",
         '示例：npm run plugin:send -- --prompt "把指定对象改成深灰色" --node-ids 1:2',
         formatSelectionForTargeting(session),
       ].join("\n"),
     );
+  }
+}
+
+function ensureSafeMutationBatch(batch: FigmaPluginCommandBatch) {
+  const mutatingTargetSets = batch.commands
+    .map((command) => normalizeLegacyCommandForExternalDispatch(command))
+    .filter((command) => requiresExplicitNodeIdsForExternalCapability(command.capabilityId))
+    .map((command) => {
+      const targetIds = Array.isArray(command.nodeIds) ? command.nodeIds.filter(Boolean) : [];
+      return targetIds.join(",");
+    })
+    .filter(Boolean);
+
+  if (mutatingTargetSets.length > 1 && new Set(mutatingTargetSets).size > 1) {
+    fail("外部修改类命令不能在同一批次里混用多组 nodeIds。请按父级或局部拆成多次 plugin:send。");
+  }
+}
+
+function formatNumberish(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "?";
+  }
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  return String(value);
+}
+
+function printInspectedFrameNodes(nodes: PluginNodeInspection[]) {
+  if (!nodes.length) {
+    console.log("frameNodes: empty");
+    return;
+  }
+
+  console.log("frameNodes:");
+  for (const node of nodes) {
+    const indent = "  ".repeat(Math.max(0, node.depth));
+    const geometry = `pos=(${formatNumberish(node.x)}, ${formatNumberish(node.y)}) size=${formatNumberish(node.width)}x${formatNumberish(node.height)}`;
+    const visual = [
+      `fills=${node.fills.join(", ") || "none"}`,
+      `strokes=${node.strokes?.join(", ") || "none"}`,
+      `opacity=${formatNumberish(node.opacity)}`,
+      `radius=${formatNumberish(node.cornerRadius)}`,
+    ].join(" ");
+    const meta = [
+      `id=${node.id}`,
+      `type=${node.type}`,
+      `children=${node.childCount}`,
+      `index=${node.indexWithinParent}`,
+      `generated=${node.generatedBy || "no"}`,
+      `visible=${node.visible === null || node.visible === undefined ? "?" : node.visible ? "yes" : "no"}`,
+      `locked=${node.locked === null || node.locked === undefined ? "?" : node.locked ? "yes" : "no"}`,
+    ].join(" ");
+    console.log(`${indent}- ${node.name} | ${meta} | ${geometry} | ${visual}`);
+    const layoutDetails = [
+      node.layoutMode ? `layout=${node.layoutMode}` : null,
+      node.layoutPositioning ? `positioning=${node.layoutPositioning}` : null,
+      node.layoutAlign ? `align=${node.layoutAlign}` : null,
+      node.layoutGrow !== null && node.layoutGrow !== undefined ? `grow=${formatNumberish(node.layoutGrow)}` : null,
+      node.primaryAxisSizingMode ? `primarySize=${node.primaryAxisSizingMode}` : null,
+      node.counterAxisSizingMode ? `counterSize=${node.counterAxisSizingMode}` : null,
+      node.itemSpacing !== null && node.itemSpacing !== undefined ? `gap=${formatNumberish(node.itemSpacing)}` : null,
+      [node.paddingTop, node.paddingRight, node.paddingBottom, node.paddingLeft].some((value) => value !== null && value !== undefined)
+        ? `padding=${formatNumberish(node.paddingTop)}/${formatNumberish(node.paddingRight)}/${formatNumberish(node.paddingBottom)}/${formatNumberish(node.paddingLeft)}`
+        : null,
+      node.constraintsHorizontal || node.constraintsVertical
+        ? `constraints=${node.constraintsHorizontal || "?"}/${node.constraintsVertical || "?"}`
+        : null,
+      node.clipsContent !== null && node.clipsContent !== undefined ? `clips=${node.clipsContent ? "yes" : "no"}` : null,
+      node.isMask !== null && node.isMask !== undefined ? `mask=${node.isMask ? "yes" : "no"}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (layoutDetails) {
+      console.log(`${indent}  ${layoutDetails}`);
+    }
+    const componentDetails = [
+      node.mainComponentId ? `mainComponent=${node.mainComponentName || "?"}(${node.mainComponentId})` : null,
+      node.componentPropertyDefinitionKeys?.length ? `componentDefs=${node.componentPropertyDefinitionKeys.join(",")}` : null,
+      node.componentPropertyReferences?.length ? `componentRefs=${node.componentPropertyReferences.join(",")}` : null,
+      node.variantProperties && Object.keys(node.variantProperties).length
+        ? `variants=${Object.entries(node.variantProperties)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(", ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (componentDetails) {
+      console.log(`${indent}  ${componentDetails}`);
+    }
+    if (node.textContent) {
+      console.log(
+        `${indent}  text="${node.textContent.replace(/\s+/g, " ").slice(0, 120)}" font=${node.fontFamily || "?"}/${node.fontStyle || "?"} size=${formatNumberish(node.fontSize)} weight=${formatNumberish(node.fontWeight)} align=${node.textAlignment || "?"}`,
+      );
+    }
   }
 }
 
@@ -284,7 +496,7 @@ function printReconstructionJob(job: ReconstructionJob) {
   console.log(`allowOutpainting: ${job.input.allowOutpainting}`);
   console.log(`maxIterations: ${job.input.maxIterations}`);
   console.log(`iterationCount: ${job.iterationCount}`);
-  console.log(`bestDiffScore: ${job.bestDiffScore === null ? "none" : job.bestDiffScore.toFixed(4)}`);
+  console.log(`bestCompositeScore: ${job.bestDiffScore === null ? "none" : job.bestDiffScore.toFixed(4)}`);
   console.log(
     `lastImprovement: ${job.lastImprovement === null ? "none" : job.lastImprovement.toFixed(4)}`,
   );
@@ -304,6 +516,13 @@ function printReconstructionJob(job: ReconstructionJob) {
       console.log(
         `canonicalFrame: ${job.analysis.canonicalFrame.width}x${job.analysis.canonicalFrame.height} | fixed=${job.analysis.canonicalFrame.fixedTargetFrame ? "yes" : "no"} | deprojected=${job.analysis.canonicalFrame.deprojected ? "yes" : "no"}`,
       );
+      if (job.analysis.canonicalFrame.sourceQuad?.length) {
+        console.log(
+          `sourceQuad: ${job.analysis.canonicalFrame.sourceQuad
+            .map((point) => `(${point.x.toFixed(3)}, ${point.y.toFixed(3)})`)
+            .join(" -> ")}`,
+        );
+      }
     }
     if (job.analysis.completionZones.length) {
       console.log("completionZones:");
@@ -392,8 +611,16 @@ function printReconstructionJob(job: ReconstructionJob) {
   }
   if (job.diffMetrics) {
     console.log(
-      `diffMetrics: global=${job.diffMetrics.globalSimilarity.toFixed(4)} layout=${job.diffMetrics.layoutSimilarity.toFixed(4)} edge=${job.diffMetrics.edgeSimilarity.toFixed(4)} colorDelta=${job.diffMetrics.colorDelta.toFixed(4)}`,
+      `diffMetrics: composite=${job.diffMetrics.compositeScore.toFixed(4)} grade=${job.diffMetrics.grade} global=${job.diffMetrics.globalSimilarity.toFixed(4)} layout=${job.diffMetrics.layoutSimilarity.toFixed(4)} structure=${job.diffMetrics.structureSimilarity.toFixed(4)} edge=${job.diffMetrics.edgeSimilarity.toFixed(4)} colorDelta=${job.diffMetrics.colorDelta.toFixed(4)} hotspotAvg=${job.diffMetrics.hotspotAverage.toFixed(4)} hotspotPeak=${job.diffMetrics.hotspotPeak.toFixed(4)} hotspotCoverage=${job.diffMetrics.hotspotCoverage.toFixed(4)}`,
     );
+    if (job.diffMetrics.acceptanceGates.length) {
+      console.log("acceptanceGates:");
+      for (const gate of job.diffMetrics.acceptanceGates) {
+        console.log(
+          `- [${gate.passed ? "pass" : "fail"}] ${gate.label}: ${gate.metric} ${gate.comparator} ${gate.threshold.toFixed(3)} (actual=${gate.actual.toFixed(3)}${gate.hard ? " | hard" : ""})`,
+        );
+      }
+    }
     if (job.diffMetrics.hotspots.length) {
       console.log("hotspots:");
       for (const hotspot of job.diffMetrics.hotspots) {
@@ -446,6 +673,706 @@ function decodeDataUrl(dataUrl: string) {
   return { mimeType, buffer, extension };
 }
 
+function parseSourceQuadPixels(sourceQuadRaw: string | null): ReconstructionPoint[] {
+  if (!sourceQuadRaw) {
+    return [];
+  }
+
+  const points = sourceQuadRaw
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [xRaw, yRaw] = entry.split(",").map((value) => value.trim());
+      const x = Number.parseFloat(xRaw || "");
+      const y = Number.parseFloat(yRaw || "");
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        fail(`无效的 --source-quad-px 点: ${entry}`);
+      }
+      return { x, y };
+    });
+
+  if (points.length !== 4) {
+    fail("--source-quad-px 需要 4 个点，格式示例：--source-quad-px \"46,28;572,6;630,760;54,736\"");
+  }
+
+  return points;
+}
+
+function normalizeSourceQuad(
+  points: ReconstructionPoint[],
+  width: number,
+  height: number,
+) {
+  if (!width || !height) {
+    fail("参考图尺寸缺失，无法归一化 sourceQuad。");
+  }
+
+  return points.map((point) => ({
+    x: Number((point.x / width).toFixed(6)),
+    y: Number((point.y / height).toFixed(6)),
+  }));
+}
+
+function resolveReconstructionReferenceDataUrl(job: ReconstructionJob) {
+  return job.referenceRaster?.dataUrl || job.referenceNode.previewDataUrl || null;
+}
+
+async function writeRemapPreview(
+  job: ReconstructionJob,
+  sourceQuadPixels: ReconstructionPoint[],
+  outputDirectory: string,
+) {
+  const referenceDataUrl = resolveReconstructionReferenceDataUrl(job);
+  if (!referenceDataUrl) {
+    fail("当前 job 缺少 referenceRaster / previewDataUrl，无法生成 remap preview。");
+  }
+
+  const reference = decodeDataUrl(referenceDataUrl);
+  const baseName = sanitizeFileSegment(job.id);
+  const inputPath = path.join(outputDirectory, `${baseName}-remap-source.${reference.extension}`);
+  const outputPath = path.join(outputDirectory, `${baseName}-remap-preview.png`);
+  await writeFile(inputPath, reference.buffer);
+
+  const targetWidth = Math.max(1, Math.round(job.targetNode.width || job.analysis?.canonicalFrame?.width || 0));
+  const targetHeight = Math.max(1, Math.round(job.targetNode.height || job.analysis?.canonicalFrame?.height || 0));
+  if (!targetWidth || !targetHeight) {
+    fail("目标 Frame 尺寸缺失，无法生成 remap preview。");
+  }
+
+  const scriptPath = path.join(process.cwd(), "scripts", "remap_reference_image.py");
+  await execFileAsync("python3", [
+    scriptPath,
+    inputPath,
+    outputPath,
+    String(targetWidth),
+    String(targetHeight),
+    JSON.stringify(sourceQuadPixels),
+  ]);
+
+  return outputPath;
+}
+
+async function estimateSourceQuadPixels(
+  job: ReconstructionJob,
+  outputDirectory: string,
+): Promise<EstimatedScreenQuad> {
+  const referenceDataUrl = resolveReconstructionReferenceDataUrl(job);
+  if (!referenceDataUrl) {
+    fail("当前 job 缺少 referenceRaster / previewDataUrl，无法自动估计 sourceQuad。");
+  }
+
+  const reference = decodeDataUrl(referenceDataUrl);
+  const baseName = sanitizeFileSegment(job.id);
+  const inputPath = path.join(outputDirectory, `${baseName}-estimate-source.${reference.extension}`);
+  const debugPrefix = path.join(outputDirectory, `${baseName}-estimate`);
+  await writeFile(inputPath, reference.buffer);
+
+  const targetWidth = Math.max(1, Math.round(job.targetNode.width || job.analysis?.canonicalFrame?.width || 0));
+  const targetHeight = Math.max(1, Math.round(job.targetNode.height || job.analysis?.canonicalFrame?.height || 0));
+  if (!targetWidth || !targetHeight) {
+    fail("目标 Frame 尺寸缺失，无法自动估计 sourceQuad。");
+  }
+
+  const scriptPath = path.join(process.cwd(), "scripts", "estimate_screen_quad.py");
+  const { stdout } = await execFileAsync("python3", [
+    scriptPath,
+    inputPath,
+    String(targetWidth),
+    String(targetHeight),
+    debugPrefix,
+  ]);
+  return JSON.parse(stdout) as EstimatedScreenQuad;
+}
+
+async function runPreviewHeuristicAnalysis(imagePath: string): Promise<PreviewHeuristicAnalysis> {
+  const scriptPath = path.join(process.cwd(), "scripts", "analyze_reference_preview.py");
+  const { stdout } = await execFileAsync("python3", [scriptPath, imagePath]);
+  return JSON.parse(stdout) as PreviewHeuristicAnalysis;
+}
+
+async function runVisionOcr(imagePath: string): Promise<VisionOcrLine[]> {
+  const scriptPath = path.join(process.cwd(), "scripts", "ocr_preview_vision.swift");
+  const { stdout } = await execFileAsync("/usr/bin/xcrun", ["swift", scriptPath, imagePath], {
+    cwd: process.cwd(),
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return JSON.parse(stdout) as VisionOcrLine[];
+}
+
+function boundsOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+) {
+  const x0 = Math.max(left.x, right.x);
+  const y0 = Math.max(left.y, right.y);
+  const x1 = Math.min(left.x + left.width, right.x + right.width);
+  const y1 = Math.min(left.y + left.height, right.y + right.height);
+  if (x1 <= x0 || y1 <= y0) {
+    return 0;
+  }
+  return (x1 - x0) * (y1 - y0);
+}
+
+function inferTextRole(
+  bounds: { height: number },
+  targetHeight: number,
+  fallback?: "headline" | "body" | "metric" | "label" | "unknown",
+) {
+  const pixelHeight = bounds.height * targetHeight;
+  if (pixelHeight >= 48) {
+    return "metric" as const;
+  }
+  if (pixelHeight >= 28) {
+    return "headline" as const;
+  }
+  if (pixelHeight >= 18) {
+    return "body" as const;
+  }
+  if (fallback && fallback !== "unknown") {
+    return fallback;
+  }
+  return "label" as const;
+}
+
+function inferTextRoleFromContent(
+  content: string,
+  bounds: { height: number },
+  targetHeight: number,
+  fallback?: "headline" | "body" | "metric" | "label" | "unknown",
+) {
+  const normalized = content.trim();
+  const lettersOnly = normalized.replace(/[^A-Za-z]/g, "");
+  const uppercaseRatio =
+    lettersOnly.length > 0
+      ? lettersOnly.replace(/[A-Z]/g, "").length / lettersOnly.length
+      : 1;
+  if (/%/.test(normalized) || /^\d+(?:\.\d+)?%$/.test(normalized)) {
+    return "metric" as const;
+  }
+  if (normalized.split(/\s+/).length >= 3 && bounds.height * targetHeight >= 26) {
+    return "headline" as const;
+  }
+  if (lettersOnly.length > 0 && uppercaseRatio <= 0.25 && normalized.length <= 18) {
+    return "label" as const;
+  }
+  return inferTextRole(bounds, targetHeight, fallback);
+}
+
+function makeAnalysisBlockId(prefix: string, index: number, matchedCandidateId?: string | null) {
+  if (matchedCandidateId) {
+    return `${matchedCandidateId}-ocr-${index + 1}`;
+  }
+  return `${prefix}-${index + 1}`;
+}
+
+function fontFamilyForRole(role: "headline" | "body" | "metric" | "label" | "unknown") {
+  return role === "metric" || role === "headline" ? "SF Pro Display" : "SF Pro Text";
+}
+
+function fontWeightForRole(role: "headline" | "body" | "metric" | "label" | "unknown") {
+  if (role === "metric") {
+    return 700;
+  }
+  if (role === "headline") {
+    return 500;
+  }
+  return 500;
+}
+
+function hexToRgb(hex: string | null | undefined) {
+  if (!hex) {
+    return null;
+  }
+  const normalized = hex.replace("#", "").trim();
+  if (normalized.length !== 6) {
+    return null;
+  }
+  const value = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return {
+    r: (value >> 16) & 0xff,
+    g: (value >> 8) & 0xff,
+    b: value & 0xff,
+  };
+}
+
+function relativeLuminance(hex: string | null | undefined) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return null;
+  }
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+function contrastRatio(foregroundHex: string, backgroundHex: string) {
+  const foreground = relativeLuminance(foregroundHex);
+  const background = relativeLuminance(backgroundHex);
+  if (foreground === null || background === null) {
+    return 0;
+  }
+  const lighter = Math.max(foreground, background);
+  const darker = Math.min(foreground, background);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function hexToHsv(hex: string | null | undefined) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return null;
+  }
+  const normalizedRed = rgb.r / 255;
+  const normalizedGreen = rgb.g / 255;
+  const normalizedBlue = rgb.b / 255;
+  const maxChannel = Math.max(normalizedRed, normalizedGreen, normalizedBlue);
+  const minChannel = Math.min(normalizedRed, normalizedGreen, normalizedBlue);
+  const delta = maxChannel - minChannel;
+  const saturation = maxChannel === 0 ? 0 : delta / maxChannel;
+  return {
+    saturation,
+    value: maxChannel,
+  };
+}
+
+function estimateFontSizeFromBounds(
+  content: string,
+  role: "headline" | "body" | "metric" | "label" | "unknown",
+  bounds: { width: number; height: number },
+  targetWidth: number,
+  targetHeight: number,
+  hintedFontSize: number | null,
+) {
+  const heightPx = Math.max(8, bounds.height * targetHeight);
+  const widthPx = Math.max(8, bounds.width * targetWidth);
+  const glyphCount = Math.max(1, content.replace(/\s+/g, "").length);
+  const widthFactor =
+    role === "metric" ? 0.72 : role === "headline" ? 0.56 : role === "body" ? 0.62 : 0.64;
+  const heightFactor =
+    role === "metric" ? 0.58 : role === "headline" ? 0.44 : role === "body" ? 0.38 : 0.34;
+  const widthBased = widthPx / (glyphCount * widthFactor);
+  const heightBased = heightPx * heightFactor;
+  const rawEstimate = Math.min(widthBased, heightBased);
+  const hardMin = role === "metric" ? 22 : role === "headline" ? 18 : 12;
+  const hardMax = role === "metric" ? 64 : role === "headline" ? 34 : role === "body" ? 22 : 18;
+  const estimate = Math.max(hardMin, Math.min(hardMax, Math.round(rawEstimate)));
+  if (hintedFontSize !== null && Number.isFinite(hintedFontSize)) {
+    const blended = Math.round((estimate * 0.8) + (hintedFontSize * 0.2));
+    return Math.max(hardMin, Math.min(hardMax, blended));
+  }
+  return estimate;
+}
+
+function inferTextColor(
+  bounds: { x: number; y: number; width: number; height: number },
+  layoutRegions: NonNullable<PreviewHeuristicAnalysis["layoutRegions"]>,
+  theme: "light" | "dark",
+) {
+  const matchedRegion = [...layoutRegions]
+    .filter((region): region is NonNullable<typeof region> & { bounds: { x: number; y: number; width: number; height: number } } =>
+      Boolean(region?.bounds),
+    )
+    .sort((left, right) => boundsOverlap(right.bounds, bounds) - boundsOverlap(left.bounds, bounds))[0];
+  if (bounds.y <= 0.1) {
+    return theme === "dark" ? "#F5F7FF" : "#111111";
+  }
+  if (matchedRegion?.fillHex) {
+    const hsv = hexToHsv(matchedRegion.fillHex);
+    if (
+      hsv &&
+      hsv.saturation >= 0.18 &&
+      hsv.value >= 0.42 &&
+      bounds.x + bounds.width <= matchedRegion.bounds.x + matchedRegion.bounds.width + 0.02
+    ) {
+      return "#111111";
+    }
+    const blackContrast = contrastRatio("#111111", matchedRegion.fillHex);
+    const whiteContrast = contrastRatio("#F5F7FF", matchedRegion.fillHex);
+    return blackContrast >= whiteContrast ? "#111111" : "#F5F7FF";
+  }
+  return theme === "dark" ? "#F5F7FF" : "#111111";
+}
+
+function clampNormalized(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function expandNormalizedBounds(
+  bounds: { x: number; y: number; width: number; height: number },
+  inset: { top: number; right: number; bottom: number; left: number },
+) {
+  const x0 = clampNormalized(bounds.x - inset.left);
+  const y0 = clampNormalized(bounds.y - inset.top);
+  const x1 = clampNormalized(bounds.x + bounds.width + inset.right);
+  const y1 = clampNormalized(bounds.y + bounds.height + inset.bottom);
+  return {
+    x: x0,
+    y: y0,
+    width: Math.max(0.04, x1 - x0),
+    height: Math.max(0.04, y1 - y0),
+  };
+}
+
+function unionNormalizedBounds(items: Array<{ bounds: { x: number; y: number; width: number; height: number } }>) {
+  if (!items.length) {
+    return null;
+  }
+  const x0 = Math.min(...items.map((item) => item.bounds.x));
+  const y0 = Math.min(...items.map((item) => item.bounds.y));
+  const x1 = Math.max(...items.map((item) => item.bounds.x + item.bounds.width));
+  const y1 = Math.max(...items.map((item) => item.bounds.y + item.bounds.height));
+  return {
+    x: clampNormalized(x0),
+    y: clampNormalized(y0),
+    width: Math.max(0.04, clampNormalized(x1) - clampNormalized(x0)),
+    height: Math.max(0.04, clampNormalized(y1) - clampNormalized(y0)),
+  };
+}
+
+function synthesizeVectorShapesFromText(
+  textBlocks: Array<{
+    content: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  }>,
+  heuristic: PreviewHeuristicAnalysis,
+) {
+  const accentHex = heuristic.styleHints?.accentColorHex || heuristic.dominantColors?.[1] || "#7172D7";
+  const darkHex = heuristic.styleHints?.primaryColorHex || heuristic.dominantColors?.[0] || "#0C0C0D";
+  const designSurfaces: Array<{
+    id: string;
+    name: string;
+    bounds: { x: number; y: number; width: number; height: number };
+    fillHex: string;
+    cornerRadius: number;
+    opacity: number;
+    shadow: "none" | "soft";
+    inferred: boolean;
+  }> = [];
+  const vectorPrimitives: Array<{
+    id: string;
+    kind: "line";
+    name: string;
+    bounds: { x: number; y: number; width: number; height: number };
+    points: Array<{ x: number; y: number }>;
+    fillHex: null;
+    strokeHex: string;
+    strokeWeight: number;
+    opacity: number;
+    cornerRadius: null;
+    svgMarkup: null;
+    inferred: boolean;
+  }> = [];
+
+  const headerText = textBlocks.find((block) => /^Wednesday/i.test(block.content));
+  const topCardTexts = textBlocks.filter((block) => {
+    if (headerText && block.content === headerText.content) {
+      return false;
+    }
+    return block.bounds.y < 0.42 && !/^Save$/i.test(block.content) && !/^Walk/i.test(block.content);
+  });
+  const topUnion = unionNormalizedBounds(topCardTexts);
+  if (topUnion) {
+    designSurfaces.push({
+      id: "surface-top-card",
+      name: "Top Card",
+      bounds: expandNormalizedBounds(topUnion, { top: 0.06, right: 0.03, bottom: 0.05, left: 0.03 }),
+      fillHex: accentHex,
+      cornerRadius: 28,
+      opacity: 1,
+      shadow: "soft",
+      inferred: true,
+    });
+
+    const todayScore = textBlocks.find((block) => /^TODAY SCORE$/i.test(block.content));
+    if (todayScore) {
+      const lineY = clampNormalized(todayScore.bounds.y - 0.025);
+      vectorPrimitives.push({
+        id: "primitive-top-divider",
+        kind: "line",
+        name: "Top Divider",
+        bounds: {
+          x: clampNormalized(topUnion.x + 0.06),
+          y: lineY,
+          width: Math.max(0.12, Math.min(0.46, topUnion.width * 0.45)),
+          height: 0.003,
+        },
+        points: [],
+        fillHex: null,
+        strokeHex: "#111111",
+        strokeWeight: 3,
+        opacity: 1,
+        cornerRadius: null,
+        svgMarkup: null,
+        inferred: true,
+      });
+    }
+  }
+
+  const heuristicBottom = (heuristic.layoutRegions || []).find((region) => {
+    const bounds = region?.bounds;
+    return Boolean(bounds && bounds.y > 0.45 && bounds.width > 0.6);
+  });
+  if (heuristicBottom?.bounds) {
+    designSurfaces.push({
+      id: "surface-bottom-card",
+      name: "Bottom Card",
+      bounds: {
+        x: clampNormalized(Math.max(0.08, heuristicBottom.bounds.x)),
+        y: clampNormalized(Math.max(0.48, heuristicBottom.bounds.y)),
+        width: Math.min(0.78, heuristicBottom.bounds.width),
+        height: Math.min(0.34, heuristicBottom.bounds.height),
+      },
+      fillHex: accentHex,
+      cornerRadius: 28,
+      opacity: 1,
+      shadow: "soft",
+      inferred: true,
+    });
+  }
+
+  const saveText = textBlocks.find((block) => /^Save$/i.test(block.content));
+  if (saveText) {
+    designSurfaces.push({
+      id: "surface-save-pill",
+      name: "Save Pill",
+      bounds: expandNormalizedBounds(saveText.bounds, { top: 0.04, right: 0.08, bottom: 0.05, left: 0.06 }),
+      fillHex: darkHex,
+      cornerRadius: 28,
+      opacity: 1,
+      shadow: "none",
+      inferred: true,
+    });
+  }
+
+  const walkText = textBlocks.find((block) => /^Walk/i.test(block.content));
+  if (walkText) {
+    designSurfaces.push({
+      id: "surface-walk-pill",
+      name: "Walk Pill",
+      bounds: expandNormalizedBounds(walkText.bounds, { top: 0.04, right: 0.08, bottom: 0.06, left: 0.06 }),
+      fillHex: darkHex,
+      cornerRadius: 28,
+      opacity: 1,
+      shadow: "none",
+      inferred: true,
+    });
+  }
+
+  return { designSurfaces, vectorPrimitives };
+}
+
+async function writeVectorAnalysisDraft(
+  job: ReconstructionJob,
+  sourceQuadPixels: ReconstructionPoint[],
+  remapPreviewPath: string,
+  outputDirectory: string,
+) {
+  const referenceWidth = job.referenceRaster?.width || job.referenceNode.width || 0;
+  const referenceHeight = job.referenceRaster?.height || job.referenceNode.height || 0;
+  const targetWidth = Math.max(1, Math.round(job.targetNode.width || 0));
+  const targetHeight = Math.max(1, Math.round(job.targetNode.height || 0));
+  const baseName = sanitizeFileSegment(job.id);
+  const draftPath = path.join(outputDirectory, `${baseName}-vector-analysis-draft.json`);
+  const normalizedQuad = normalizeSourceQuad(sourceQuadPixels, referenceWidth, referenceHeight);
+  const heuristic = await runPreviewHeuristicAnalysis(remapPreviewPath);
+  const ocrLines = await runVisionOcr(remapPreviewPath);
+  const textCandidates = heuristic.textCandidates || [];
+  const textStyleHints = heuristic.textStyleHints || [];
+  const layoutRegions = heuristic.layoutRegions || [];
+  const theme = heuristic.styleHints?.theme === "light" ? "light" : "dark";
+  const defaultTextColor = theme === "dark" ? "#F5F7FF" : "#111111";
+
+  const textBlocks = ocrLines.length
+    ? ocrLines
+        .filter((line) => Boolean(line.text.trim()))
+        .map((line, index) => {
+          const matchedCandidate = [...textCandidates]
+            .filter((candidate): candidate is NonNullable<typeof candidate> & { id: string; bounds: { x: number; y: number; width: number; height: number } } =>
+              Boolean(candidate?.id && candidate.bounds),
+            )
+            .sort((left, right) => boundsOverlap(right.bounds, line.bounds) - boundsOverlap(left.bounds, line.bounds))[0];
+          const styleHint = matchedCandidate
+            ? textStyleHints.find((hint) => hint.textCandidateId === matchedCandidate.id)
+            : null;
+          const role = inferTextRoleFromContent(
+            line.text.trim(),
+            line.bounds,
+            targetHeight,
+            matchedCandidate?.estimatedRole,
+          );
+          const roleMatchedHint = styleHint?.role === role ? styleHint : null;
+          const hintedFontSize =
+            roleMatchedHint?.fontSizeEstimate && Number.isFinite(roleMatchedHint.fontSizeEstimate)
+              ? Number(roleMatchedHint.fontSizeEstimate)
+              : null;
+          const fontSize = estimateFontSizeFromBounds(
+            line.text.trim(),
+            role,
+            line.bounds,
+            targetWidth,
+            targetHeight,
+            hintedFontSize,
+          );
+          const lineHeight =
+            roleMatchedHint?.lineHeightEstimate && Number.isFinite(roleMatchedHint.lineHeightEstimate)
+              ? Math.max(fontSize, Number(roleMatchedHint.lineHeightEstimate))
+                : role === "body"
+                ? Math.round(fontSize * 1.2)
+                : role === "label"
+                ? Math.round(fontSize * 1.1)
+                : null;
+          const colorHex =
+            roleMatchedHint?.colorHex && roleMatchedHint.colorHex !== defaultTextColor
+              ? roleMatchedHint.colorHex
+              : inferTextColor(line.bounds, layoutRegions, theme);
+          return {
+            id: makeAnalysisBlockId("ocr-line", index, matchedCandidate?.id || null),
+            bounds: line.bounds,
+            role,
+            content: line.text.trim(),
+            inferred: line.confidence < 0.6,
+            fontFamily: fontFamilyForRole(role),
+            fontStyle: null,
+            fontWeight:
+              roleMatchedHint?.fontWeightGuess && Number.isFinite(roleMatchedHint.fontWeightGuess)
+                ? Number(roleMatchedHint.fontWeightGuess)
+                : fontWeightForRole(role),
+            fontSize,
+            lineHeight,
+            letterSpacing:
+              roleMatchedHint?.letterSpacingEstimate && Number.isFinite(roleMatchedHint.letterSpacingEstimate)
+                ? Number(roleMatchedHint.letterSpacingEstimate)
+                : 0,
+            alignment:
+              roleMatchedHint?.alignmentGuess && roleMatchedHint.alignmentGuess !== "unknown"
+                ? roleMatchedHint.alignmentGuess
+                : "left",
+            colorHex,
+          };
+        })
+    : [];
+  const synthesizedShapes = synthesizeVectorShapesFromText(textBlocks, heuristic);
+
+  const payload: SubmitReconstructionAnalysisPayload = {
+    analysisProvider: "codex-assisted",
+    analysisVersion: "2026-03-23-vector-draft-v1",
+    warnings: [
+      "这是 CLI 生成的 vector analysis draft；当前优先恢复可编辑文本和大区块，复杂图标/纹理仍未完全结构化。",
+    ],
+    analysis: {
+      width: targetWidth,
+      height: targetHeight,
+      dominantColors: heuristic.dominantColors || ["#0D0D12", "#AA99FF"],
+      canonicalFrame: {
+        width: targetWidth,
+        height: targetHeight,
+        fixedTargetFrame: true,
+        deprojected: true,
+        mappingMode: "reflow",
+        sourceQuad: normalizedQuad,
+      },
+      layoutRegions: heuristic.layoutRegions || [],
+      designSurfaces: synthesizedShapes.designSurfaces,
+      vectorPrimitives: synthesizedShapes.vectorPrimitives,
+      textCandidates,
+      textBlocks,
+      ocrBlocks: ocrLines.map((line, index) => ({
+        id: `ocr-${index + 1}`,
+        text: line.text.trim(),
+        confidence: line.confidence,
+        bounds: line.bounds,
+        lineCount: Math.max(1, line.text.split(/\n+/).length),
+        language: null,
+        source: "ocr",
+      })),
+      textStyleHints,
+      assetCandidates: heuristic.assetCandidates || [],
+      styleHints: {
+        theme,
+        cornerRadiusHint: heuristic.styleHints?.cornerRadiusHint || 28,
+        shadowHint: heuristic.styleHints?.shadowHint || "none",
+        primaryColorHex: heuristic.styleHints?.primaryColorHex || "#0D0D12",
+        accentColorHex: heuristic.styleHints?.accentColorHex || "#AA99FF",
+      },
+      uncertainties: [
+        ...(heuristic.uncertainties || []),
+        "当前 vector draft 仍不会自动恢复复杂插画/纹理；主要恢复文本层和大矩形区块。",
+      ],
+    },
+  };
+  await writeFile(draftPath, JSON.stringify(payload, null, 2), "utf8");
+  return draftPath;
+}
+
+async function writeHybridAnalysisDraft(
+  job: ReconstructionJob,
+  sourceQuadPixels: ReconstructionPoint[],
+  outputDirectory: string,
+) {
+  const referenceWidth = job.referenceRaster?.width || job.referenceNode.width || 0;
+  const referenceHeight = job.referenceRaster?.height || job.referenceNode.height || 0;
+  const targetWidth = Math.max(1, Math.round(job.targetNode.width || 0));
+  const targetHeight = Math.max(1, Math.round(job.targetNode.height || 0));
+  const baseName = sanitizeFileSegment(job.id);
+  const draftPath = path.join(outputDirectory, `${baseName}-hybrid-analysis-draft.json`);
+  const normalizedQuad = normalizeSourceQuad(sourceQuadPixels, referenceWidth, referenceHeight);
+  const payload: SubmitReconstructionAnalysisPayload = {
+    analysisProvider: "codex-assisted",
+    analysisVersion: "2026-03-23-hybrid-draft-v1",
+    warnings: [
+      "这是 CLI 生成的 hybrid analysis draft；请在 submit 前继续补充 textBlocks、assetCandidates、completionZones。",
+    ],
+    analysis: {
+      width: referenceWidth,
+      height: referenceHeight,
+      dominantColors: ["#0D0D12", "#AA99FF"],
+      canonicalFrame: {
+        width: targetWidth,
+        height: targetHeight,
+        fixedTargetFrame: true,
+        deprojected: true,
+        mappingMode: "reflow",
+        sourceQuad: normalizedQuad,
+      },
+      layoutRegions: [],
+      designSurfaces: [],
+      vectorPrimitives: [],
+      textCandidates: [],
+      textBlocks: [],
+      ocrBlocks: [],
+      textStyleHints: [],
+      assetCandidates: [],
+      completionZones: [],
+      deprojectionNotes: [
+        {
+          id: "source-quad-draft",
+          message: "sourceQuad 由 plugin:reconstruct 的 remap/draft 工作流生成，仍需人工确认。",
+          targetId: null,
+        },
+      ],
+      styleHints: {
+        theme: "dark",
+        cornerRadiusHint: 28,
+        shadowHint: "none",
+        primaryColorHex: "#0D0D12",
+        accentColorHex: "#AA99FF",
+      },
+      uncertainties: [
+        "当前 draft 只包含 fixed-frame + deprojection 骨架，未自动恢复可编辑 overlay。",
+      ],
+    },
+  };
+  await writeFile(draftPath, JSON.stringify(payload, null, 2), "utf8");
+  return draftPath;
+}
+
 async function writeContextPackArtifacts(
   contextPack: ReconstructionContextPack,
   outputDirectory: string,
@@ -483,6 +1410,14 @@ function parsePreviewDataUrl(node: PluginBridgeSession["selection"][number]) {
     fail(`节点 ${node.name} 的预览数据格式无效。`);
   }
 
+  return Buffer.from(match[1], "base64");
+}
+
+function parseArtifactDataUrl(dataUrl: string, label: string) {
+  const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl);
+  if (!match) {
+    fail(`${label} 的预览数据格式无效。`);
+  }
   return Buffer.from(match[1], "base64");
 }
 
@@ -543,6 +1478,7 @@ async function runSend(argv: string[]) {
   const nodeIds = parseNodeIds(readFlag(argv, "--node-ids"));
   ensureExplicitTargetingForMutations(rawBatch, session, nodeIds);
   const batch = prepareBatchForExternalDispatch(rawBatch, nodeIds);
+  ensureSafeMutationBatch(batch);
   const payload: QueuePluginCommandPayload = {
     targetSessionId: session.id,
     source: "codex",
@@ -596,17 +1532,50 @@ async function runPreview(argv: string[]) {
 async function runInspect(argv: string[]) {
   const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
   const session = pickSession(snapshot.sessions, readFlag(argv, "--session"));
+  const frameNodeId = readFlag(argv, "--frame-node-id");
+  const outputDirectory =
+    readFlag(argv, "--out") || path.join(process.cwd(), "data", "plugin-previews");
+
+  await mkdir(outputDirectory, { recursive: true });
+
+  if (frameNodeId) {
+    if (!session.capabilities.some((capability) => capability.id === "nodes.inspect-subtree")) {
+      fail(`当前在线插件会话 ${session.id} 还不支持 nodes.inspect-subtree。请在 Figma 里重新打开 AutoDesign 插件后再试。`);
+    }
+    const payload = await requestJson<InspectFrameResponsePayload>("/api/plugin-bridge/inspect-frame", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: session.id,
+        frameNodeId,
+        maxDepth: (() => {
+          const raw = readFlag(argv, "--max-depth");
+          const value = raw ? Number.parseInt(raw, 10) : Number.NaN;
+          return Number.isFinite(value) ? value : undefined;
+        })(),
+        includePreview: !argv.includes("--no-preview"),
+      }),
+    });
+
+    console.log(
+      `${session.id} | ${session.label} ${session.pluginVersion} | ${session.status} | ${session.fileName} / ${session.pageName}`,
+    );
+    printInspectedFrameNodes(payload.nodes);
+    if (payload.preview) {
+      const fileName = `${session.id}-frame-${sanitizeFileSegment(frameNodeId)}-${sanitizeFileSegment(payload.nodes[0]?.name || "preview")}.png`;
+      const filePath = path.join(outputDirectory, fileName);
+      await writeFile(filePath, parseArtifactDataUrl(payload.preview.dataUrl, `Frame ${frameNodeId}`));
+      console.log(`preview: ${filePath}`);
+    }
+    return;
+  }
+
   console.log(
     `${session.id} | ${session.label} ${session.pluginVersion} | ${session.status} | ${session.fileName} / ${session.pageName}`,
   );
   printCapabilities(session);
   printSelection(session);
-
-  const outputDirectory =
-    readFlag(argv, "--out") || path.join(process.cwd(), "data", "plugin-previews");
   const targets = pickPreviewTargets(session, readFlag(argv, "--index"));
 
-  await mkdir(outputDirectory, { recursive: true });
   console.log("previews:");
   for (const target of targets) {
     const fileName = `${session.id}-${target.index}-${sanitizeFileSegment(target.node.name)}.png`;
@@ -619,6 +1588,60 @@ async function runInspect(argv: string[]) {
 async function runReconstruct(argv: string[]) {
   const jobId = readFlag(argv, "--job");
   if (jobId) {
+    if (
+      argv.includes("--preview-remap") ||
+      argv.includes("--draft-analysis") ||
+      argv.includes("--estimate-quad")
+    ) {
+      const job = await requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}`);
+      const outputDirectory =
+        readFlag(argv, "--out") || path.join(process.cwd(), "data", "reconstruction-remaps");
+      await mkdir(outputDirectory, { recursive: true });
+      const explicitSourceQuad = parseSourceQuadPixels(readFlag(argv, "--source-quad-px"));
+      const estimated =
+        explicitSourceQuad.length === 4 ? null : await estimateSourceQuadPixels(job, outputDirectory);
+      const sourceQuadPixels = explicitSourceQuad.length === 4 ? explicitSourceQuad : estimated?.sourceQuadPixels || [];
+
+      if (!sourceQuadPixels.length) {
+        fail("无法获得 sourceQuad。请提供 --source-quad-px，或使用 --estimate-quad。");
+      }
+
+      console.log(`job: ${job.id}`);
+      console.log(
+        `sourceQuadPx: ${sourceQuadPixels.map((point) => `${point.x},${point.y}`).join(" | ")}`,
+      );
+      if (estimated) {
+        console.log(`estimatedRotation: ${estimated.rotationDegrees}deg`);
+        console.log(
+          `estimatedRotatedBox: (${estimated.rotatedBox.x}, ${estimated.rotatedBox.y}, ${estimated.rotatedBox.width}, ${estimated.rotatedBox.height}) density=${estimated.rotatedBox.density}`,
+        );
+        if (estimated.debug?.originalOverlayPath) {
+          console.log(`quadOverlay: ${estimated.debug.originalOverlayPath}`);
+        }
+        if (estimated.debug?.rotatedOverlayPath) {
+          console.log(`rotatedBoxOverlay: ${estimated.debug.rotatedOverlayPath}`);
+        }
+      }
+
+      const needsRemapPreview =
+        argv.includes("--preview-remap") ||
+        argv.includes("--draft-analysis") ||
+        job.input.strategy === "vector-reconstruction";
+      const remapPreviewPath = needsRemapPreview
+        ? await writeRemapPreview(job, sourceQuadPixels, outputDirectory)
+        : null;
+      if (remapPreviewPath) {
+        console.log(`remapPreview: ${remapPreviewPath}`);
+      }
+      if (argv.includes("--draft-analysis")) {
+        const draftPath =
+          job.input.strategy === "vector-reconstruction" && remapPreviewPath
+            ? await writeVectorAnalysisDraft(job, sourceQuadPixels, remapPreviewPath, outputDirectory)
+            : await writeHybridAnalysisDraft(job, sourceQuadPixels, outputDirectory);
+        console.log(`analysisDraft: ${draftPath}`);
+      }
+      return;
+    }
     if (argv.includes("--analyze")) {
       const job = await requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}/analyze`, {
         method: "POST",
@@ -643,6 +1666,14 @@ async function runReconstruct(argv: string[]) {
       console.log(`targetPreview: ${artifacts.targetPreviewPath || "none"}`);
       console.log("guidance:");
       for (const line of contextPack.guidance) {
+        console.log(`- ${line}`);
+      }
+      console.log("workflow:");
+      for (const line of contextPack.workflow) {
+        console.log(`- ${line}`);
+      }
+      console.log("scoringRubric:");
+      for (const line of contextPack.scoringRubric) {
         console.log(`- ${line}`);
       }
       return;
@@ -797,6 +1828,7 @@ async function runReconstruct(argv: string[]) {
     targetNodeId: readFlag(argv, "--target") || undefined,
     referenceNodeId: readFlag(argv, "--reference") || undefined,
     goal: "pixel-match",
+    strategy: parseReconstructionStrategy(argv),
     maxIterations:
       maxIterationsRaw !== null ? Number.parseInt(maxIterationsRaw, 10) : undefined,
     allowOutpainting: argv.includes("--allow-outpainting"),
@@ -812,6 +1844,8 @@ async function runReconstruct(argv: string[]) {
     console.log("next: --apply -> --render -> --measure");
   } else if (job.input.strategy === "vector-reconstruction") {
     console.log("next: --analyze -> --context-pack -> --submit-analysis -> --apply -> --render -> --measure");
+  } else if (job.input.strategy === "hybrid-reconstruction") {
+    console.log("next: --analyze -> --context-pack -> --submit-analysis -> --preview-plan -> --approve-plan -> --apply -> --render -> --measure");
   } else {
     console.log("next: --analyze or --context-pack");
   }

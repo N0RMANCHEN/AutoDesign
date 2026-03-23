@@ -5,10 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import { buildContextPack } from "../shared/context-pack.js";
 import type {
+  InspectFrameRequestPayload,
+  InspectFrameResponsePayload,
   PluginBridgeCommandRecord,
   PluginImageArtifact,
   PluginCommandResultPayload,
   PluginBridgeSession,
+  PluginNodeInspection,
   PluginNodeSummary,
   PluginSessionRegistrationPayload,
   QueuePluginCommandPayload,
@@ -61,6 +64,7 @@ import {
   markReconstructionMeasured,
   markReconstructionRefined,
   markReconstructionRendered,
+  prepareHybridReconstruction,
   prepareRasterReconstruction,
   prepareVectorReconstruction,
   reviewReconstructionAssetChoice,
@@ -76,6 +80,7 @@ import {
   createRenderedPreview,
   measurePreviewDiff,
 } from "./reconstruction-evaluation.js";
+import { remapHybridReferenceRaster } from "./reconstruction-raster.js";
 import { readProject, resetProject, writeProject } from "./storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -321,6 +326,10 @@ function collectExportedImages(command: PluginBridgeCommandRecord) {
   return command.results.flatMap((result) => result.exportedImages || []) as PluginImageArtifact[];
 }
 
+function collectInspectedNodes(command: PluginBridgeCommandRecord) {
+  return command.results.flatMap((result) => result.inspectedNodes || []) as PluginNodeInspection[];
+}
+
 function isOnlineSession(session: PluginBridgeSession | null) {
   return Boolean(session && session.status === "online");
 }
@@ -402,6 +411,10 @@ function isVectorReconstructionJob(job: ReconstructionJob) {
   return job.input.strategy === "vector-reconstruction";
 }
 
+function isHybridReconstructionJob(job: ReconstructionJob) {
+  return job.input.strategy === "hybrid-reconstruction";
+}
+
 async function exportSingleNodeImage(
   targetSessionId: string,
   nodeId: string,
@@ -431,6 +444,36 @@ async function exportSingleNodeImage(
   return artifact;
 }
 
+async function inspectFrameSubtree(
+  targetSessionId: string,
+  frameNodeId: string,
+  options?: { maxDepth?: number },
+) {
+  const command = await queueAndWaitForPluginBatch(targetSessionId, [
+    {
+      type: "capability",
+      capabilityId: "nodes.inspect-subtree",
+      payload: {
+        nodeId: frameNodeId,
+        ...(Number.isFinite(options?.maxDepth) ? { maxDepth: options?.maxDepth } : {}),
+      },
+      executionMode: "strict",
+    },
+  ]);
+
+  assertSuccessfulCommandRecord(command, "Frame inspect");
+  return collectInspectedNodes(command);
+}
+
+function isReconstructionGeneratedInspectionNode(node: PluginNodeInspection) {
+  return (
+    node.generatedBy === "reconstruction" ||
+    node.name.startsWith("AD Vector/") ||
+    node.name.startsWith("AD Hybrid/") ||
+    node.name.startsWith("AD Rebuild/")
+  );
+}
+
 async function ensureRasterReference(job: ReconstructionJob) {
   if (job.referenceRaster) {
     return job.referenceRaster;
@@ -455,12 +498,26 @@ async function ensureVectorReference(job: ReconstructionJob) {
   return updated?.referenceRaster || referenceRaster;
 }
 
-function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructionJob>>) {
+async function ensureHybridReference(job: ReconstructionJob) {
+  if (job.referenceRaster) {
+    return job.referenceRaster;
+  }
+
+  const referenceRaster = await exportSingleNodeImage(job.input.targetSessionId, job.referenceNode.id, {
+    preferOriginalBytes: true,
+  });
+  const updated = await prepareHybridReconstruction(job.id, { referenceRaster });
+  return updated?.referenceRaster || referenceRaster;
+}
+
+async function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructionJob>>) {
   if (!job?.rebuildPlan) {
     throw new Error("Reconstruction job is missing rebuildPlan.");
   }
 
   const namePrefix = `AD Rebuild/${job.id}`;
+  const allowRasterBase = isHybridReconstructionJob(job);
+  const remappedHybridRaster = allowRasterBase ? await remapHybridReferenceRaster(job) : null;
   let surfaceIndex = 0;
   let textIndex = 0;
   let primitiveIndex = 0;
@@ -472,16 +529,54 @@ function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructi
     "nodes.create-svg",
   ]);
 
-  return job.rebuildPlan.ops.map((command): FigmaCapabilityCommand => {
+  const normalizedOps = job.rebuildPlan.ops.map((command): FigmaCapabilityCommand => {
     if (command.type !== "capability") {
       throw new Error("Rebuild plan contains a non-capability command.");
     }
+    const isRasterBase = command.capabilityId === "reconstruction.apply-raster-reference";
     if (
       command.capabilityId !== "nodes.create-frame" &&
       command.capabilityId !== "nodes.create-text" &&
-      !vectorCapabilityIds.has(command.capabilityId)
+      !vectorCapabilityIds.has(command.capabilityId) &&
+      !(allowRasterBase && isRasterBase)
     ) {
       throw new Error(`Rebuild plan contains unsupported capability: ${command.capabilityId}.`);
+    }
+
+    if (isRasterBase) {
+      const payload =
+        command.payload as FigmaCapabilityCommand<"reconstruction.apply-raster-reference">["payload"];
+      return {
+        type: "capability",
+        capabilityId: "reconstruction.apply-raster-reference",
+        executionMode: "strict",
+        dryRun: command.dryRun,
+        nodeIds: [job.targetNode.id],
+        payload: {
+          referenceNodeId: payload.referenceNodeId || job.referenceNode.id,
+          ...(remappedHybridRaster ? { referenceDataUrl: remappedHybridRaster.dataUrl } : {}),
+          resultName:
+            typeof payload.resultName === "string" && payload.resultName.trim()
+              ? payload.resultName.trim()
+              : `${namePrefix}/RasterBase`,
+          replaceTargetContents: payload.replaceTargetContents !== false,
+          resizeTargetToReference: payload.resizeTargetToReference === true,
+          fitMode: remappedHybridRaster ? "stretch" : payload.fitMode || "cover",
+          ...(Number.isFinite(payload.x) ? { x: Number(payload.x) } : {}),
+          ...(Number.isFinite(payload.y) ? { y: Number(payload.y) } : {}),
+          ...(Number.isFinite(payload.width)
+            ? { width: Number(payload.width) }
+            : remappedHybridRaster
+              ? { width: remappedHybridRaster.width }
+              : {}),
+          ...(Number.isFinite(payload.height)
+            ? { height: Number(payload.height) }
+            : remappedHybridRaster
+              ? { height: remappedHybridRaster.height }
+              : {}),
+          ...(Number.isFinite(payload.opacity) ? { opacity: Number(payload.opacity) } : {}),
+        },
+      } satisfies FigmaCapabilityCommand<"reconstruction.apply-raster-reference">;
     }
 
     if (command.capabilityId === "nodes.create-frame") {
@@ -599,13 +694,103 @@ function normalizeRebuildCommands(job: Awaited<ReturnType<typeof getReconstructi
       },
     } satisfies FigmaCapabilityCommand<"nodes.create-svg">;
   });
+
+  return [...normalizedOps, ...buildHybridCompletionPatchCommands(job)];
+}
+
+function buildEmbeddedCropSvg(
+  dataUrl: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  crop: ReconstructionBounds,
+  outputWidth: number,
+  outputHeight: number,
+) {
+  const cropX = Math.max(0, Math.round(crop.x * sourceWidth));
+  const cropY = Math.max(0, Math.round(crop.y * sourceHeight));
+  const cropWidth = Math.max(1, Math.round(crop.width * sourceWidth));
+  const cropHeight = Math.max(1, Math.round(crop.height * sourceHeight));
+  const imageWidth = Math.max(1, Math.round((sourceWidth * outputWidth) / cropWidth));
+  const imageHeight = Math.max(1, Math.round((sourceHeight * outputHeight) / cropHeight));
+  const imageX = -Math.round((cropX * outputWidth) / cropWidth);
+  const imageY = -Math.round((cropY * outputHeight) / cropHeight);
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${outputWidth} ${outputHeight}">`,
+    `<clipPath id="clip"><rect x="0" y="0" width="${outputWidth}" height="${outputHeight}" rx="0" ry="0" /></clipPath>`,
+    `<g clip-path="url(#clip)">`,
+    `<image href="${dataUrl}" x="${imageX}" y="${imageY}" width="${imageWidth}" height="${imageHeight}" preserveAspectRatio="none" />`,
+    `</g>`,
+    `</svg>`,
+  ].join("");
+}
+
+function buildHybridCompletionPatchCommands(
+  job: Awaited<ReturnType<typeof getReconstructionJob>>,
+): FigmaCapabilityCommand[] {
+  if (!job || !isHybridReconstructionJob(job) || !job.analysis || !job.referenceRaster) {
+    return [];
+  }
+
+  const approvedAssetIds = new Set(
+    job.approvedAssetChoices.filter((choice) => choice.decision === "approved").map((choice) => choice.assetId),
+  );
+  if (!approvedAssetIds.size || !job.analysis.completionZones.length) {
+    return [];
+  }
+
+  const approvedSlices = job.analysis.assetCandidates
+    .filter(
+      (asset) =>
+        approvedAssetIds.has(asset.id) &&
+        (asset.kind === "texture" || asset.kind === "background-slice") &&
+        asset.extractMode !== "ignore",
+    )
+    .sort((left, right) => boundsArea(right.bounds) - boundsArea(left.bounds));
+
+  if (!approvedSlices.length) {
+    return [];
+  }
+
+  const targetWidth = job.targetNode.width || job.analysis.canonicalFrame?.width || job.analysis.width;
+  const targetHeight = job.targetNode.height || job.analysis.canonicalFrame?.height || job.analysis.height;
+  const sourceWidth = Math.max(1, job.analysis.width || job.referenceRaster.width);
+  const sourceHeight = Math.max(1, job.analysis.height || job.referenceRaster.height);
+
+  return job.analysis.completionZones.map((zone, index) => {
+    const slice = approvedSlices[index % approvedSlices.length];
+    const projected = projectBounds(zone.bounds, targetWidth, targetHeight);
+    return {
+      type: "capability",
+      capabilityId: "nodes.create-svg",
+      executionMode: "strict",
+      payload: {
+        name: `AD Rebuild/${job.id}/Completion/${zone.id}`,
+        svgMarkup: buildEmbeddedCropSvg(
+          job.referenceRaster!.dataUrl,
+          sourceWidth,
+          sourceHeight,
+          slice.bounds,
+          projected.width,
+          projected.height,
+        ),
+        x: projected.x,
+        y: projected.y,
+        width: projected.width,
+        height: projected.height,
+        opacity: 1,
+        parentNodeId: job.targetNode.id,
+        analysisRefId: zone.id,
+      },
+    } satisfies FigmaCapabilityCommand<"nodes.create-svg">;
+  });
 }
 
 function buildStructureReport(
   job: ReconstructionJob,
   targetNode: PluginNodeSummary,
 ): ReconstructionStructureReport | null {
-  if (!isVectorReconstructionJob(job)) {
+  if (!isVectorReconstructionJob(job) && !isHybridReconstructionJob(job)) {
     return null;
   }
 
@@ -634,11 +819,17 @@ function buildStructureReport(
       `target frame 尺寸发生变化: expected ${expectedWidth}x${expectedHeight}, actual ${actualWidth}x${actualHeight}`,
     );
   }
-  if (imageFillNodeCount > 0) {
+  if (isVectorReconstructionJob(job) && imageFillNodeCount > 0) {
     issues.push("vector-reconstruction 结果中检测到 raster/image-fill 写回。");
   }
-  if (textNodeCount + vectorNodeCount === 0) {
+  if (isVectorReconstructionJob(job) && textNodeCount + vectorNodeCount === 0) {
     issues.push("vector-reconstruction rebuild plan 没有生成任何可编辑节点。");
+  }
+  if (isHybridReconstructionJob(job) && imageFillNodeCount === 0) {
+    issues.push("hybrid-reconstruction rebuild plan 没有写入 raster base。");
+  }
+  if (isHybridReconstructionJob(job) && textNodeCount + vectorNodeCount === 0) {
+    issues.push("hybrid-reconstruction rebuild plan 没有生成任何可编辑 overlay 节点。");
   }
 
   return {
@@ -829,7 +1020,9 @@ function resolveLoopStopReason(job: ReconstructionJob): ReconstructionLoopStopRe
     return job.stopReason;
   }
   if (job.status === "completed") {
-    if ((job.diffMetrics?.globalSimilarity || job.diffScore || 0) >= 0.9) {
+    const compositeScore = job.diffMetrics?.compositeScore || job.diffScore || 0;
+    const hardGateFailed = Boolean(job.diffMetrics?.acceptanceGates.some((gate) => gate.hard && !gate.passed));
+    if (compositeScore >= 0.9 && !hardGateFailed) {
       return "target_reached";
     }
     if (job.iterationCount >= job.input.maxIterations) {
@@ -1021,9 +1214,30 @@ function assertSuccessfulCommandRecord(
 }
 
 async function clearReconstructionNodes(job: NonNullable<Awaited<ReturnType<typeof getReconstructionJob>>>) {
-  if (!job.appliedNodeIds.length) {
+  let generatedNodeIds: string[] = [];
+  const fallbackWarnings: string[] = [];
+  try {
+    const inspectedNodes = await inspectFrameSubtree(job.input.targetSessionId, job.targetNode.id, {
+      maxDepth: 8,
+    });
+    generatedNodeIds = uniqueStrings(
+      inspectedNodes
+        .filter((node) => node.id !== job.targetNode.id && isReconstructionGeneratedInspectionNode(node))
+        .sort((left, right) => right.depth - left.depth)
+        .map((node) => node.id),
+    );
+  } catch (error) {
+    fallbackWarnings.push(
+      `未能检查目标 Frame 子树，已回退到仅删除当前 job 记录的已应用节点。原因: ${error instanceof Error ? error.message : "inspect failed"}`,
+    );
+  }
+  const nodeIdsToDelete = uniqueStrings([...generatedNodeIds, ...job.appliedNodeIds]).filter(
+    (nodeId) => nodeId !== job.targetNode.id,
+  );
+
+  if (!nodeIdsToDelete.length) {
     return {
-      warnings: [] as string[],
+      warnings: fallbackWarnings,
       deletedNodeIds: [] as string[],
     };
   }
@@ -1033,7 +1247,7 @@ async function clearReconstructionNodes(job: NonNullable<Awaited<ReturnType<type
       type: "capability",
       capabilityId: "nodes.delete",
       payload: {},
-      nodeIds: job.appliedNodeIds,
+      nodeIds: nodeIdsToDelete,
       executionMode: "strict",
     },
   ]);
@@ -1043,9 +1257,43 @@ async function clearReconstructionNodes(job: NonNullable<Awaited<ReturnType<type
   });
 
   return {
-    warnings,
+    warnings: uniqueStrings([...fallbackWarnings, ...warnings]),
     deletedNodeIds: collectChangedNodeIds(command),
   };
+}
+
+async function handleInspectFrame(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
+  const payload = await readBody<InspectFrameRequestPayload>(request);
+  if (!payload.targetSessionId || !payload.frameNodeId) {
+    sendJson(response, 400, { ok: false, error: "targetSessionId 和 frameNodeId 必填" });
+    return;
+  }
+
+  try {
+    const nodes = await inspectFrameSubtree(payload.targetSessionId, payload.frameNodeId, {
+      maxDepth: payload.maxDepth,
+    });
+    const preview = payload.includePreview === false
+      ? null
+      : await exportSingleNodeImage(payload.targetSessionId, payload.frameNodeId, {
+          constraint: { type: "WIDTH", value: 320 },
+        });
+    const result: InspectFrameResponsePayload = {
+      sessionId: payload.targetSessionId,
+      frameNodeId: payload.frameNodeId,
+      nodes,
+      preview,
+    };
+    sendJson(response, 200, result);
+  } catch (error) {
+    sendJson(response, 500, {
+      ok: false,
+      error: error instanceof Error ? error.message : "Frame inspect failed",
+    });
+  }
 }
 
 function findSelectionNode(session: PluginBridgeSession, nodeId: string) {
@@ -1360,6 +1608,16 @@ async function handleReconstructionJobAnalyze(
       sendJson(response, 200, updated);
       return;
     }
+    if (isHybridReconstructionJob(job)) {
+      const referenceRaster = await ensureHybridReference(job);
+      const updated = await prepareHybridReconstruction(jobId, { referenceRaster });
+      if (!updated) {
+        sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+        return;
+      }
+      sendJson(response, 200, updated);
+      return;
+    }
 
     const result = await runPreviewOnlyReconstructionAnalysis(job);
     const updated = await completeReconstructionAnalysis(jobId, result);
@@ -1583,24 +1841,48 @@ async function handleReconstructionJobApply(
         latestJob = prepared;
       }
     }
-
-    if (latestJob.appliedNodeIds.length) {
-      const cleared = await clearReconstructionNodes(latestJob);
-      accumulatedWarnings = uniqueStrings([...accumulatedWarnings, ...cleared.warnings]);
-      const reset = await clearReconstructionAppliedState(job.id, {
-        warnings: cleared.warnings,
-        message: "等待重新写入 Figma。",
+    if (isHybridReconstructionJob(job) && !job.referenceRaster) {
+      const referenceRaster = await ensureHybridReference(job);
+      const prepared = await prepareHybridReconstruction(job.id, {
+        referenceRaster,
       });
-      if (!reset) {
-        sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
-        return;
+      if (prepared) {
+        latestJob = prepared;
       }
+    }
+
+    const cleared = await clearReconstructionNodes(latestJob);
+    accumulatedWarnings = uniqueStrings([...accumulatedWarnings, ...cleared.warnings]);
+    const reset = await clearReconstructionAppliedState(job.id, {
+      warnings: cleared.warnings,
+      message: "等待重新写入 Figma。",
+    });
+    if (!reset) {
+      sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
+      return;
     }
 
     latestJob = (await getReconstructionJob(jobId)) || latestJob;
     if (!latestJob) {
       sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
       return;
+    }
+
+    if (isHybridReconstructionJob(latestJob) && latestJob.analysis?.completionZones.length) {
+      const approvedCompletionSlices = latestJob.analysis.assetCandidates.filter((asset) =>
+        latestJob.approvedAssetChoices.some(
+          (choice) =>
+            choice.assetId === asset.id &&
+            choice.decision === "approved" &&
+            (asset.kind === "texture" || asset.kind === "background-slice"),
+        ),
+      );
+      if (!approvedCompletionSlices.length) {
+        accumulatedWarnings = uniqueStrings([
+          ...accumulatedWarnings,
+          "当前 hybrid analysis 含 completionZones，但没有已批准的 texture/background-slice 候选；补边区域不会被 deterministic patch 填充。",
+        ]);
+      }
     }
 
     const command = isRasterExactJob(latestJob)
@@ -1620,7 +1902,7 @@ async function handleReconstructionJobApply(
         ])
       : await queueAndWaitForPluginBatch(
           latestJob.input.targetSessionId,
-          normalizeRebuildCommands(latestJob),
+          await normalizeRebuildCommands(latestJob),
         );
 
     accumulatedWarnings = uniqueStrings([
@@ -1670,12 +1952,8 @@ async function handleReconstructionJobClear(
   }
 
   try {
-    let warnings: string[] = [];
-
-    if (job.appliedNodeIds.length) {
-      const cleared = await clearReconstructionNodes(job);
-      warnings = uniqueStrings(cleared.warnings);
-    }
+    const cleared = await clearReconstructionNodes(job);
+    const warnings = uniqueStrings(cleared.warnings);
 
     const updated = await clearReconstructionAppliedState(jobId, {
       warnings,
@@ -1769,6 +2047,9 @@ async function handleReconstructionJobMeasure(
     if (!referencePreviewDataUrl && isVectorReconstructionJob(job)) {
       referencePreviewDataUrl = (await ensureVectorReference(job)).dataUrl;
     }
+    if (!referencePreviewDataUrl && isHybridReconstructionJob(job)) {
+      referencePreviewDataUrl = (await ensureHybridReference(job)).dataUrl;
+    }
     if (!referencePreviewDataUrl) {
       referencePreviewDataUrl = job.analysis?.previewDataUrl || null;
     }
@@ -1818,6 +2099,9 @@ async function handleReconstructionJobRefine(
     if (isVectorReconstructionJob(job)) {
       throw new Error("vector-reconstruction 目前不支持自动 refine。请重新提交 analysis 后再 apply/render/measure。");
     }
+    if (isHybridReconstructionJob(job)) {
+      throw new Error("hybrid-reconstruction 当前先支持 apply/render/measure，暂不支持自动 refine。");
+    }
     if (!job.diffMetrics) {
       throw new Error("Reconstruction job has no diff metrics yet.");
     }
@@ -1862,6 +2146,9 @@ async function handleReconstructionJobIterate(
     if (isVectorReconstructionJob(job)) {
       throw new Error("vector-reconstruction 目前不支持 iterate。请修改 analysis/rebuild plan 后重新 apply。");
     }
+    if (isHybridReconstructionJob(job)) {
+      throw new Error("hybrid-reconstruction 当前暂不支持 iterate。请重新提交 analysis 后再 apply/render/measure。");
+    }
     const updated = await runReconstructionIteration(jobId);
     sendJson(response, 200, updated);
   } catch (error) {
@@ -1899,6 +2186,9 @@ async function handleReconstructionJobLoop(
     }
     if (isVectorReconstructionJob(job)) {
       throw new Error("vector-reconstruction 目前不支持自动 refine loop。");
+    }
+    if (isHybridReconstructionJob(job)) {
+      throw new Error("hybrid-reconstruction 当前暂不支持自动 refine loop。");
     }
     const updated = await runReconstructionLoop(jobId);
     sendJson(response, 200, updated);
@@ -2047,6 +2337,11 @@ async function routeRequest(
 
   if (context.pathname === "/api/plugin-bridge/commands" && context.method === "POST") {
     await handlePluginCommandQueue(request, response);
+    return;
+  }
+
+  if (context.pathname === "/api/plugin-bridge/inspect-frame" && context.method === "POST") {
+    await handleInspectFrame(request, response);
     return;
   }
 

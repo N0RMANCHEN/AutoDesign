@@ -8,6 +8,7 @@ import type {
 export const READ_ONLY_EXTERNAL_CAPABILITY_IDS = new Set<PluginCapabilityId>([
   "selection.refresh",
   "assets.export-node-image",
+  "nodes.inspect-subtree",
 ]);
 
 export function requiresExplicitNodeIdsForExternalCapability(
@@ -21,12 +22,14 @@ export function normalizeLegacyCommandForExternalDispatch(
   nodeIds?: string[],
 ): FigmaCapabilityCommand {
   if (command.type === "capability") {
+    const effectiveNodeIds =
+      Array.isArray(command.nodeIds) && command.nodeIds.length > 0 ? command.nodeIds : nodeIds;
     if (!nodeIds || nodeIds.length === 0) {
-      return command;
+      return effectiveNodeIds ? { ...command, nodeIds: effectiveNodeIds } : command;
     }
     return {
       ...command,
-      nodeIds,
+      nodeIds: effectiveNodeIds,
     };
   }
 

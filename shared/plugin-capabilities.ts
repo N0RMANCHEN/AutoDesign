@@ -19,6 +19,10 @@ export type PluginExecutionMode = "strict" | "best-effort";
 
 export type PluginCapabilityPayloadMap = {
   "selection.refresh": Record<string, never>;
+  "nodes.inspect-subtree": {
+    nodeId: string;
+    maxDepth?: number;
+  };
   "fills.set-fill": { hex: string };
   "fills.clear-fill": Record<string, never>;
   "strokes.set-stroke": { hex: string };
@@ -42,6 +46,24 @@ export type PluginCapabilityPayloadMap = {
   "nodes.duplicate": { offsetX?: number; offsetY?: number };
   "nodes.group": { name?: string };
   "nodes.frame-selection": { name?: string; padding?: number };
+  "layout.configure-frame": {
+    layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+    primaryAxisSizingMode?: "FIXED" | "AUTO";
+    counterAxisSizingMode?: "FIXED" | "AUTO";
+    primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
+    counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
+    itemSpacing?: number;
+    paddingLeft?: number;
+    paddingRight?: number;
+    paddingTop?: number;
+    paddingBottom?: number;
+    clipsContent?: boolean;
+  };
+  "layout.configure-child": {
+    layoutAlign?: "INHERIT" | "STRETCH" | "MIN" | "CENTER" | "MAX";
+    layoutGrow?: number;
+    layoutPositioning?: "AUTO" | "ABSOLUTE";
+  };
   "nodes.create-frame": {
     name?: string;
     width: number;
@@ -127,10 +149,17 @@ export type PluginCapabilityPayloadMap = {
     preferOriginalBytes?: boolean;
   };
   "reconstruction.apply-raster-reference": {
-    referenceNodeId: string;
+    referenceNodeId?: string;
+    referenceDataUrl?: string;
     resultName?: string;
     replaceTargetContents?: boolean;
     resizeTargetToReference?: boolean;
+    fitMode?: "cover" | "contain" | "stretch";
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    opacity?: number;
   };
   "text.set-content": { value: string };
   "text.set-font-size": { value: number };
@@ -159,6 +188,17 @@ export type PluginCapabilityPayloadMap = {
     hex: string;
     applyToSelection?: boolean;
   };
+  "nodes.set-clips-content": { value: boolean };
+  "nodes.set-mask": { value: boolean };
+  "components.create-component": { name?: string };
+  "components.create-instance": {
+    mainComponentNodeId: string;
+    x?: number;
+    y?: number;
+    parentNodeId?: string;
+    name?: string;
+  };
+  "components.detach-instance": Record<string, never>;
   "nodes.delete": Record<string, never>;
   "undo.undo-last": Record<string, never>;
   "variables.upsert-color-variable": {
@@ -188,6 +228,16 @@ export const IMPLEMENTED_PLUGIN_CAPABILITIES: PluginCapabilityDescriptor[] = [
     domain: "selection",
     label: "Refresh selection",
     description: "Read the current selection and update the plugin session context.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: false,
+    requiresEditAccess: false,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "nodes.inspect-subtree",
+    domain: "nodes",
+    label: "Inspect subtree",
+    description: "Read a frame or node subtree and return a structured node inventory.",
     supportedEditorTypes: ["figma"],
     requiresSelection: false,
     requiresEditAccess: false,
@@ -348,6 +398,26 @@ export const IMPLEMENTED_PLUGIN_CAPABILITIES: PluginCapabilityDescriptor[] = [
     domain: "nodes",
     label: "Frame selection",
     description: "Wrap the current selection in a new frame.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "layout.configure-frame",
+    domain: "layout-autolayout",
+    label: "Configure frame layout",
+    description: "Configure Auto Layout settings, padding, spacing, and clipping on selected frames.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "layout.configure-child",
+    domain: "layout-autolayout",
+    label: "Configure child layout",
+    description: "Configure child layout rules inside Auto Layout parents.",
     supportedEditorTypes: ["figma"],
     requiresSelection: true,
     requiresEditAccess: true,
@@ -534,6 +604,56 @@ export const IMPLEMENTED_PLUGIN_CAPABILITIES: PluginCapabilityDescriptor[] = [
     description: "Create or update a local text style.",
     supportedEditorTypes: ["figma"],
     requiresSelection: false,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "nodes.set-clips-content",
+    domain: "nodes",
+    label: "Set clips content",
+    description: "Toggle clipping on selected frame-like nodes.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "nodes.set-mask",
+    domain: "nodes",
+    label: "Set mask",
+    description: "Toggle mask behavior on selected nodes that support masking.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "components.create-component",
+    domain: "components-instances",
+    label: "Create component",
+    description: "Convert a selected node into a reusable component.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "components.create-instance",
+    domain: "components-instances",
+    label: "Create instance",
+    description: "Create an instance from an existing component node.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: false,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "components.detach-instance",
+    domain: "components-instances",
+    label: "Detach instance",
+    description: "Detach selected instances into editable layers.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: true,
     requiresEditAccess: true,
     requiresPaidFeature: false,
   },

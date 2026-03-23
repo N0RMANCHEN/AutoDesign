@@ -5,8 +5,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
+  ReconstructionAcceptanceGate,
   ReconstructionBounds,
   ReconstructionDiffHotspot,
+  ReconstructionDiffGrade,
   ReconstructionDiffMetrics,
   ReconstructionJob,
   ReconstructionRefineSuggestion,
@@ -65,11 +67,37 @@ function normalizeHotspots(input: unknown): ReconstructionDiffHotspot[] {
     .slice(0, 6);
 }
 
+function normalizeAcceptanceGates(input: unknown): ReconstructionAcceptanceGate[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item, index) => {
+      const comparator = item?.comparator === "lte" ? "lte" : "gte";
+      return {
+        id: typeof item?.id === "string" ? item.id : `gate-${index + 1}`,
+        label: typeof item?.label === "string" && item.label.trim() ? item.label.trim() : `Gate ${index + 1}`,
+        metric: typeof item?.metric === "string" && item.metric.trim() ? item.metric.trim() : "unknown",
+        comparator,
+        threshold: Number.isFinite(item?.threshold) ? Number(item.threshold) : 0,
+        actual: Number.isFinite(item?.actual) ? Number(item.actual) : 0,
+        passed: Boolean(item?.passed),
+        hard: item?.hard !== false,
+      } satisfies ReconstructionAcceptanceGate;
+    })
+    .slice(0, 12);
+}
+
 function clampScore(value: unknown) {
   if (!Number.isFinite(value)) {
     return 0;
   }
   return Math.max(0, Math.min(1, Number(value)));
+}
+
+function normalizeGrade(value: unknown): ReconstructionDiffGrade {
+  return value === "A" || value === "B" || value === "C" || value === "D" ? value : "F";
 }
 
 function buildRenderedPreview(
@@ -124,6 +152,13 @@ export async function measurePreviewDiff(
       colorDelta: clampScore(payload?.colorDelta),
       edgeSimilarity: clampScore(payload?.edgeSimilarity),
       layoutSimilarity: clampScore(payload?.layoutSimilarity),
+      structureSimilarity: clampScore(payload?.structureSimilarity),
+      hotspotAverage: clampScore(payload?.hotspotAverage),
+      hotspotPeak: clampScore(payload?.hotspotPeak),
+      hotspotCoverage: clampScore(payload?.hotspotCoverage),
+      compositeScore: clampScore(payload?.compositeScore),
+      grade: normalizeGrade(payload?.grade),
+      acceptanceGates: normalizeAcceptanceGates(payload?.acceptanceGates),
       hotspots: normalizeHotspots(payload?.hotspots),
     };
   } finally {
@@ -149,55 +184,74 @@ function regionForHotspot(job: ReconstructionJob, hotspot: ReconstructionDiffHot
   );
 }
 
+function findFailedGates(diffMetrics: ReconstructionDiffMetrics, metrics: string[]) {
+  const metricSet = new Set(metrics);
+  return diffMetrics.acceptanceGates.filter((gate) => !gate.passed && metricSet.has(gate.metric));
+}
+
+function hasHardGateFailures(diffMetrics: ReconstructionDiffMetrics) {
+  return diffMetrics.acceptanceGates.some((gate) => gate.hard && !gate.passed);
+}
+
 export function buildRefineSuggestions(
   job: ReconstructionJob,
   diffMetrics: ReconstructionDiffMetrics,
 ): ReconstructionRefineSuggestion[] {
   const suggestions: ReconstructionRefineSuggestion[] = [];
   const topHotspot = diffMetrics.hotspots[0] || null;
+  const colorGateFailed = findFailedGates(diffMetrics, ["colorDelta"]).length > 0;
+  const layoutGateFailures = findFailedGates(diffMetrics, [
+    "layoutSimilarity",
+    "structureSimilarity",
+    "hotspotPeak",
+    "hotspotCoverage",
+  ]);
+  const edgeGateFailures = findFailedGates(diffMetrics, ["edgeSimilarity", "globalSimilarity"]);
 
-  if (diffMetrics.colorDelta > 0.12) {
+  if (colorGateFailed) {
     suggestions.push({
       id: "refine-fill-1",
       kind: "nudge-fill",
-      confidence: Math.min(0.95, 0.45 + diffMetrics.colorDelta),
-      message: "主色偏差仍然明显，下一轮优先收敛背景区块与强调色块的 fill。",
+      confidence: Math.min(0.95, 0.56 + diffMetrics.colorDelta),
+      message:
+        "颜色门槛仍未通过。先并排查看参考图与当前 render，只调整一个父级容器内的 fill/opacity，再重新 render+measure。",
       bounds: topHotspot ? topHotspot.bounds : null,
     });
   }
 
-  if (diffMetrics.layoutSimilarity < 0.88 && topHotspot) {
+  if (layoutGateFailures.length && topHotspot) {
     const region = regionForHotspot(job, topHotspot);
     suggestions.push({
       id: "refine-layout-1",
       kind: "nudge-layout",
-      confidence: Math.min(0.95, 0.55 + (1 - diffMetrics.layoutSimilarity)),
+      confidence: Math.min(0.95, 0.58 + (1 - Math.min(diffMetrics.layoutSimilarity, diffMetrics.structureSimilarity))),
       message: region
-        ? `热点区域仍有明显错位，优先调整 ${region.id} 的尺寸和位置。`
-        : "热点区域仍有明显错位，优先调整主要区块的尺寸和位置。",
+        ? `布局/结构门槛未通过。先复看参考图，只修改 ${region.id} 所在父级的尺寸、位置、圆角和间距，再重新导出目标预览。`
+        : "布局/结构门槛未通过。先复看参考图，只修改一个主要区块父级的尺寸、位置、圆角和间距，再重新导出目标预览。",
       bounds: topHotspot.bounds,
     });
   }
 
-  if (diffMetrics.edgeSimilarity < 0.86) {
+  if (edgeGateFailures.length) {
     suggestions.push({
       id: "refine-text-1",
       kind: "nudge-text",
-      confidence: Math.min(0.95, 0.5 + (1 - diffMetrics.edgeSimilarity)),
-      message: "文本或边界轮廓还不够接近，下一轮优先收敛字号、占位文案和层级关系。",
+      confidence: Math.min(0.95, 0.54 + (1 - diffMetrics.edgeSimilarity)),
+      message:
+        "边界/文本门槛仍未通过。先锁定结构不动，只收紧字号、字重、文案、线条和层级，不要同时再改多个容器。",
       bounds: topHotspot ? topHotspot.bounds : null,
     });
   }
 
-  if (!suggestions.length || diffMetrics.globalSimilarity >= 0.9) {
+  if (!suggestions.length || (!hasHardGateFailures(diffMetrics) && diffMetrics.compositeScore >= 0.9)) {
     suggestions.push({
       id: "refine-review-1",
       kind: "manual-review",
-      confidence: diffMetrics.globalSimilarity >= 0.9 ? 0.92 : 0.55,
+      confidence: !hasHardGateFailures(diffMetrics) && diffMetrics.compositeScore >= 0.9 ? 0.92 : 0.55,
       message:
-        diffMetrics.globalSimilarity >= 0.9
-          ? "当前结果已达到 tranche 阈值，可进入人工复核或下一阶段精修。"
-          : "当前差异已收敛到中低水平，可先人工确认是否进入下一轮自动修正。",
+        !hasHardGateFailures(diffMetrics) && diffMetrics.compositeScore >= 0.9
+          ? "当前结果已通过硬门槛，先做人眼复核；若局部仍不对，只做单区域小步修正。"
+          : "当前建议已不足以安全自动推进。请先并排复看参考图和当前 render，再决定下一轮仅修改哪个局部。",
       bounds: topHotspot ? topHotspot.bounds : null,
     });
   }

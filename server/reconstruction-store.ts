@@ -75,17 +75,58 @@ function sortJobs(jobs: ReconstructionJob[]) {
   return [...jobs].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function normalizeDiffMetrics(job: ReconstructionJob): ReconstructionJob["diffMetrics"] {
+  if (!job.diffMetrics) {
+    return null;
+  }
+
+  return {
+    globalSimilarity: Number.isFinite(job.diffMetrics.globalSimilarity) ? Number(job.diffMetrics.globalSimilarity) : 0,
+    colorDelta: Number.isFinite(job.diffMetrics.colorDelta) ? Number(job.diffMetrics.colorDelta) : 0,
+    edgeSimilarity: Number.isFinite(job.diffMetrics.edgeSimilarity) ? Number(job.diffMetrics.edgeSimilarity) : 0,
+    layoutSimilarity: Number.isFinite(job.diffMetrics.layoutSimilarity) ? Number(job.diffMetrics.layoutSimilarity) : 0,
+    structureSimilarity: Number.isFinite(job.diffMetrics.structureSimilarity)
+      ? Number(job.diffMetrics.structureSimilarity)
+      : Number.isFinite(job.diffMetrics.layoutSimilarity)
+        ? Number(job.diffMetrics.layoutSimilarity)
+        : 0,
+    hotspotAverage: Number.isFinite(job.diffMetrics.hotspotAverage) ? Number(job.diffMetrics.hotspotAverage) : 0,
+    hotspotPeak: Number.isFinite(job.diffMetrics.hotspotPeak)
+      ? Number(job.diffMetrics.hotspotPeak)
+      : Array.isArray(job.diffMetrics.hotspots) && job.diffMetrics.hotspots.length
+        ? Math.max(...job.diffMetrics.hotspots.map((item) => (Number.isFinite(item.score) ? Number(item.score) : 0)))
+        : 0,
+    hotspotCoverage: Number.isFinite(job.diffMetrics.hotspotCoverage) ? Number(job.diffMetrics.hotspotCoverage) : 0,
+    compositeScore: Number.isFinite(job.diffMetrics.compositeScore)
+      ? Number(job.diffMetrics.compositeScore)
+      : Number.isFinite(job.diffMetrics.globalSimilarity)
+        ? Number(job.diffMetrics.globalSimilarity)
+        : 0,
+    grade:
+      job.diffMetrics.grade === "A" ||
+      job.diffMetrics.grade === "B" ||
+      job.diffMetrics.grade === "C" ||
+      job.diffMetrics.grade === "D"
+        ? job.diffMetrics.grade
+        : "F",
+    acceptanceGates: Array.isArray(job.diffMetrics.acceptanceGates) ? job.diffMetrics.acceptanceGates : [],
+    hotspots: Array.isArray(job.diffMetrics.hotspots) ? job.diffMetrics.hotspots : [],
+  };
+}
+
 function normalizeJob(job: ReconstructionJob): ReconstructionJob {
   return {
     ...job,
     input: {
       ...job.input,
       strategy:
-        job.input?.strategy === "raster-exact"
-          ? "raster-exact"
-          : job.input?.strategy === "structural-preview"
-            ? "structural-preview"
-            : "vector-reconstruction",
+        job.input?.strategy === "hybrid-reconstruction"
+          ? "hybrid-reconstruction"
+          : job.input?.strategy === "raster-exact"
+            ? "raster-exact"
+            : job.input?.strategy === "structural-preview"
+              ? "structural-preview"
+              : "vector-reconstruction",
     },
     analysisVersion: typeof job.analysisVersion === "string" && job.analysisVersion.trim()
       ? job.analysisVersion
@@ -113,7 +154,7 @@ function normalizeJob(job: ReconstructionJob): ReconstructionJob {
     approvedFontChoices: Array.isArray(job.approvedFontChoices) ? job.approvedFontChoices : [],
     approvedAssetChoices: Array.isArray(job.approvedAssetChoices) ? job.approvedAssetChoices : [],
     renderedPreview: job.renderedPreview || null,
-    diffMetrics: job.diffMetrics || null,
+    diffMetrics: normalizeDiffMetrics(job),
     structureReport: job.structureReport || null,
     refineSuggestions: Array.isArray(job.refineSuggestions) ? job.refineSuggestions : [],
     iterationCount: Number.isFinite(job.iterationCount) ? Number(job.iterationCount) : 0,
@@ -127,6 +168,9 @@ function resolveStrategy(
 ): ReconstructionStrategy {
   if (input.strategy === "vector-reconstruction") {
     return "vector-reconstruction";
+  }
+  if (input.strategy === "hybrid-reconstruction") {
+    return "hybrid-reconstruction";
   }
   if (input.strategy === "structural-preview") {
     return "structural-preview";
@@ -144,6 +188,16 @@ function hasActionableSuggestion(refineSuggestions: ReconstructionRefineSuggesti
   );
 }
 
+function getCompositeScore(
+  job: Pick<ReconstructionJob, "diffMetrics" | "diffScore">,
+) {
+  return job.diffMetrics?.compositeScore ?? job.diffScore ?? 0;
+}
+
+function hasHardGateFailures(job: Pick<ReconstructionJob, "diffMetrics">) {
+  return Boolean(job.diffMetrics?.acceptanceGates.some((gate) => gate.hard && !gate.passed));
+}
+
 function resolveLoopStopReason(
   job: Pick<
     ReconstructionJob,
@@ -151,8 +205,8 @@ function resolveLoopStopReason(
   >,
   refineSuggestions: ReconstructionRefineSuggestion[],
 ): ReconstructionLoopStopReason | null {
-  const globalSimilarity = job.diffMetrics?.globalSimilarity ?? job.diffScore ?? 0;
-  if (globalSimilarity >= targetSimilarityThreshold) {
+  const compositeScore = getCompositeScore(job);
+  if (compositeScore >= targetSimilarityThreshold && !hasHardGateFailures(job)) {
     return "target_reached";
   }
   if (job.iterationCount >= job.input.maxIterations) {
@@ -170,7 +224,7 @@ function resolveLoopStopReason(
 function formatLoopStopMessage(stopReason: ReconstructionLoopStopReason | null) {
   switch (stopReason) {
     case "target_reached":
-      return "已达到当前 tranche 的相似度阈值。";
+      return "已达到当前 tranche 的复合评分阈值，且硬性验收门槛已通过。";
     case "max_iterations":
       return "已达到当前 tranche 的最大迭代次数。";
     case "stalled":
@@ -579,6 +633,66 @@ export async function prepareVectorReconstruction(
   return nextJob;
 }
 
+export async function prepareHybridReconstruction(
+  jobId: string,
+  payload: {
+    referenceRaster: ReconstructionRasterAsset;
+    warnings?: string[];
+  },
+): Promise<ReconstructionJob | null> {
+  const snapshot = await readSnapshot();
+  const jobIndex = snapshot.jobs.findIndex((job) => job.id === jobId);
+  if (jobIndex < 0) {
+    return null;
+  }
+
+  const current = normalizeJob(snapshot.jobs[jobIndex]);
+  const timestamp = nowIso();
+  const nextJob: ReconstructionJob = {
+    ...current,
+    analysisVersion: "hybrid-reconstruction-v1",
+    analysisProvider: "codex-assisted",
+    updatedAt: timestamp,
+    currentStageId: "analyze-layout",
+    approvalState: "not-reviewed",
+    warnings: mergeWarnings(current.warnings, payload.warnings || []),
+    referenceRaster: payload.referenceRaster,
+    analysis: null,
+    fontMatches: [],
+    rebuildPlan: null,
+    reviewFlags: [],
+    approvedFontChoices: [],
+    approvedAssetChoices: [],
+    renderedPreview: null,
+    diffMetrics: null,
+    structureReport: null,
+    refineSuggestions: [],
+    iterationCount: 0,
+    applyStatus: "not_applied",
+    appliedNodeIds: [],
+    lastAppliedAt: null,
+    completedAt: null,
+    bestDiffScore: null,
+    lastImprovement: null,
+    stagnationCount: 0,
+    status: "ready",
+  };
+
+  updateStage(nextJob, "extract-reference", "completed", "已导出参考图高分辨率资源，并准备混合式重建。", timestamp);
+  updateStage(nextJob, "analyze-layout", "pending", "等待提交 fixed-frame 的 hybrid analysis。", timestamp);
+  updateStage(nextJob, "match-fonts", "pending", "等待确认可编辑文字与覆盖层。", timestamp);
+  updateStage(nextJob, "plan-rebuild", "pending", "等待生成 raster base + editable overlay 的重建计划。", timestamp);
+  updateStage(nextJob, "apply-rebuild", "pending", "等待写入 Figma。", timestamp);
+  resetEvaluationStages(nextJob);
+
+  snapshot.jobs[jobIndex] = nextJob;
+  await writeSnapshot({
+    jobs: sortJobs(snapshot.jobs),
+  });
+
+  return nextJob;
+}
+
 export async function failReconstructionJob(
   jobId: string,
   stageId: ReconstructionStageId,
@@ -772,7 +886,7 @@ export async function markReconstructionMeasured(
 
   const timestamp = nowIso();
   const previousDiffScore = snapshot.jobs[jobIndex].diffScore;
-  const currentDiffScore = payload.diffMetrics.globalSimilarity;
+  const currentDiffScore = payload.diffMetrics.compositeScore;
   const lastImprovement =
     previousDiffScore === null ? null : currentDiffScore - previousDiffScore;
   const stagnationCount =
@@ -799,7 +913,7 @@ export async function markReconstructionMeasured(
     nextJob,
     "measure-diff",
     "completed",
-    `已计算像素差异，globalSimilarity=${payload.diffMetrics.globalSimilarity.toFixed(3)}。`,
+    `已完成视觉评分，composite=${payload.diffMetrics.compositeScore.toFixed(3)} grade=${payload.diffMetrics.grade} failedGates=${payload.diffMetrics.acceptanceGates.filter((gate) => !gate.passed).length}。`,
     timestamp,
   );
 

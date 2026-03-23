@@ -326,6 +326,7 @@ function normalizeCanonicalFrame(
 ): ReconstructionCanonicalFrame {
   const targetWidth = Number(job.targetNode.width || rawWidth || 0);
   const targetHeight = Number(job.targetNode.height || rawHeight || 0);
+  const sourceQuad = normalizePoints(input?.sourceQuad).slice(0, 4);
   return {
     width:
       Number.isFinite(input?.width) && Number(input.width) > 0
@@ -343,6 +344,7 @@ function normalizeCanonicalFrame(
         : input?.mappingMode === "center"
           ? "center"
           : "extend",
+    ...(sourceQuad.length === 4 ? { sourceQuad } : {}),
   };
 }
 
@@ -978,11 +980,163 @@ function buildVectorReconstructionPlan(
   }
 
   return {
-    previewOnly: true,
+    previewOnly: false,
     summary: [
       `固定 frame: ${targetWidth} x ${targetHeight}。`,
       `矢量区块 ${analysis.designSurfaces.length} 个，图元 ${analysis.vectorPrimitives.length} 个，文本 ${analysis.textBlocks.length} 个。`,
       `生成 ${ops.length} 条 vector rebuild ops。`,
+    ],
+    ops,
+  };
+}
+
+function buildHybridReconstructionPlan(
+  job: ReconstructionJob,
+  analysis: ReconstructionAnalysis,
+): ReconstructionPlan {
+  const targetWidth = job.targetNode.width || analysis.canonicalFrame?.width || analysis.width;
+  const targetHeight = job.targetNode.height || analysis.canonicalFrame?.height || analysis.height;
+  const parentNodeId = job.targetNode.id;
+  const namePrefix = `AD Hybrid/${job.id}`;
+  const fitMode =
+    analysis.canonicalFrame?.mappingMode === "center"
+      ? "contain"
+      : analysis.canonicalFrame?.mappingMode === "reflow"
+        ? "stretch"
+        : "cover";
+  const ops: FigmaCapabilityCommand[] = [
+    {
+      type: "capability",
+      capabilityId: "reconstruction.apply-raster-reference",
+      payload: {
+        referenceNodeId: job.referenceNode.id,
+        resultName: `${namePrefix}/RasterBase`,
+        replaceTargetContents: true,
+        resizeTargetToReference: false,
+        fitMode,
+        x: 0,
+        y: 0,
+        width: targetWidth,
+        height: targetHeight,
+      },
+    } as FigmaCapabilityCommand,
+  ];
+
+  for (const primitive of analysis.vectorPrimitives) {
+    if (primitive.kind === "svg" && primitive.svgMarkup) {
+      const projected = primitive.bounds
+        ? projectBounds(primitive.bounds, targetWidth, targetHeight)
+        : null;
+      ops.push({
+        type: "capability",
+        capabilityId: "nodes.create-svg",
+        payload: {
+          name: `${namePrefix}/Overlay/${primitive.id}`,
+          svgMarkup: primitive.svgMarkup,
+          ...(projected ? { x: projected.x, y: projected.y, width: projected.width, height: projected.height } : {}),
+          ...(primitive.opacity !== null ? { opacity: primitive.opacity } : {}),
+          parentNodeId,
+          analysisRefId: primitive.id,
+        },
+      } as FigmaCapabilityCommand);
+      continue;
+    }
+
+    if (!primitive.bounds) {
+      continue;
+    }
+
+    const projected = projectBounds(primitive.bounds, targetWidth, targetHeight);
+    if (primitive.kind === "ellipse") {
+      ops.push({
+        type: "capability",
+        capabilityId: "nodes.create-ellipse",
+        payload: {
+          name: `${namePrefix}/Overlay/${primitive.id}`,
+          width: projected.width,
+          height: projected.height,
+          x: projected.x,
+          y: projected.y,
+          fillHex: primitive.fillHex || undefined,
+          strokeHex: primitive.strokeHex || undefined,
+          strokeWeight: primitive.strokeWeight ?? undefined,
+          opacity: primitive.opacity ?? undefined,
+          parentNodeId,
+          analysisRefId: primitive.id,
+        },
+      } as FigmaCapabilityCommand);
+      continue;
+    }
+    if (primitive.kind === "line") {
+      ops.push({
+        type: "capability",
+        capabilityId: "nodes.create-line",
+        payload: {
+          name: `${namePrefix}/Overlay/${primitive.id}`,
+          width: Math.max(1, projected.width),
+          height: Math.max(1, projected.height),
+          x: projected.x,
+          y: projected.y,
+          strokeHex: primitive.strokeHex || primitive.fillHex || "#000000",
+          strokeWeight: primitive.strokeWeight ?? 1,
+          opacity: primitive.opacity ?? undefined,
+          parentNodeId,
+          analysisRefId: primitive.id,
+        },
+      } as FigmaCapabilityCommand);
+      continue;
+    }
+    ops.push({
+      type: "capability",
+      capabilityId: primitive.kind === "rectangle" ? "nodes.create-rectangle" : "nodes.create-rectangle",
+      payload: {
+        name: `${namePrefix}/Overlay/${primitive.id}`,
+        width: projected.width,
+        height: projected.height,
+        x: projected.x,
+        y: projected.y,
+        fillHex: primitive.fillHex || undefined,
+        strokeHex: primitive.strokeHex || undefined,
+        strokeWeight: primitive.strokeWeight ?? undefined,
+        opacity: primitive.opacity ?? undefined,
+        cornerRadius: primitive.cornerRadius ?? undefined,
+        parentNodeId,
+        analysisRefId: primitive.id,
+      },
+    } as FigmaCapabilityCommand);
+  }
+
+  for (const block of analysis.textBlocks) {
+    const projected = projectBounds(block.bounds, targetWidth, targetHeight);
+    ops.push({
+      type: "capability",
+      capabilityId: "nodes.create-text",
+      payload: {
+        name: `${namePrefix}/OverlayText/${block.id}`,
+        content: block.content,
+        fontFamily: block.fontFamily,
+        ...(block.fontStyle ? { fontStyle: block.fontStyle } : {}),
+        ...(block.fontWeight !== null ? { fontWeight: block.fontWeight } : {}),
+        fontSize: block.fontSize,
+        colorHex: block.colorHex || recommendedTextColor(analysis.styleHints.theme),
+        ...(block.lineHeight !== null ? { lineHeight: block.lineHeight } : {}),
+        ...(block.letterSpacing !== null ? { letterSpacing: block.letterSpacing } : {}),
+        alignment: block.alignment,
+        x: projected.x,
+        y: projected.y,
+        parentNodeId,
+        analysisRefId: block.id,
+      },
+    } as FigmaCapabilityCommand);
+  }
+
+  return {
+    previewOnly: false,
+    summary: [
+      `固定 frame: ${targetWidth} x ${targetHeight}。`,
+      `首层写入 raster base，mapping=${analysis.canonicalFrame?.mappingMode || "extend"} -> fitMode=${fitMode}。`,
+      `覆盖层包含图元 ${analysis.vectorPrimitives.length} 个，文本 ${analysis.textBlocks.length} 个。`,
+      `生成 ${ops.length} 条 hybrid rebuild ops。`,
     ],
     ops,
   };
@@ -1025,6 +1179,21 @@ export function buildReconstructionContextPack(job: ReconstructionJob): Reconstr
     throw new Error("参考节点缺少 previewDataUrl，无法生成 Codex context pack。");
   }
 
+  const workflow = [
+    "每一轮开始前都必须同时查看 reference preview 与当前 target preview；不要只看节点树或 OCR。",
+    "先判断大布局和容器结构：主卡、副卡、胶囊、分割线、顶部信息区的位置、尺寸、圆角、间距是否正确。",
+    "一次只修改一个父级或一个局部组件；不要把多个父级的结构改动混在同一批命令里。",
+    "每次修改后必须重新 render 并重新 measure，再决定下一步，不允许连续盲改。",
+    "只有当布局、结构、颜色门槛基本通过后，才继续收紧文本内容、字号、字重和小图标。",
+    "若热点集中在某个区域，下一轮只处理该区域对应的父级，不扩散到整页。",
+  ];
+  const scoringRubric = [
+    "评分不再只看 globalSimilarity，而是以 compositeScore 为主，并同时检查 layout / structure / edge / color / hotspot gates。",
+    "target_reached 只有在 compositeScore 达标且所有硬性 gates 通过时才成立。",
+    "hotspotPeak 与 hotspotCoverage 会限制“平均像但局部明显错”的结果通过。",
+    "refine 建议必须先说明应看哪个区域、改哪个父级，再进入写入动作。",
+  ];
+
   return {
     jobId: job.id,
     mode: "codex-assisted",
@@ -1040,6 +1209,8 @@ export function buildReconstructionContextPack(job: ReconstructionJob): Reconstr
     currentFontMatches: job.fontMatches,
     currentReviewFlags: job.reviewFlags,
     currentWarnings: job.warnings,
+    workflow,
+    scoringRubric,
     guidance:
       job.input.strategy === "vector-reconstruction"
         ? [
@@ -1047,8 +1218,19 @@ export function buildReconstructionContextPack(job: ReconstructionJob): Reconstr
             "主体比例要尽量保留；frame 外侧缺失区域按相同风格做保守延展补完。",
             "最终结果必须纯可编辑矢量：文本用 text，图形用 rectangle/ellipse/line/svg。",
             "看不清的文字可以补合理文案，但必须在 textBlocks 中标记 inferred=true。",
+            "优先把容器结构、卡片尺寸、圆角、层级和对齐做对，再继续补文字和细节。",
             "提交时只提交结构化 analysis；server 负责生成 vector rebuild plan。",
           ]
+        : job.input.strategy === "hybrid-reconstruction"
+          ? [
+              "Codex 必须输出 fixed target frame 下的 hybrid analysis，而不是只给整图贴图方案。",
+              "保留 raster base 作为高保真底座；文本、规则 shape、可识别 icon 优先进入可编辑 overlay。",
+              "必须显式填写 canonicalFrame，并尽量声明 deprojected=true；透视和尺寸差异写入 deprojectionNotes。",
+              "如参考图存在透视，请在 canonicalFrame.sourceQuad 中给出参考图平面的 4 个点，顺序固定为 top-left, top-right, bottom-right, bottom-left，坐标使用 0..1 归一化。",
+              "超出参考图可直接覆盖的区域写入 completionZones；材质和背景切片写入 assetCandidates。",
+              "每一轮先比对 remap preview 与当前 target render，再只修改一个局部容器或一个 overlay 组。",
+              "不要强迫复杂纹理矢量化；难以编辑的材质区域留给 raster base。",
+            ]
         : [
             "Codex 应基于参考图输出结构化 analysis，而不是直接修改 Figma。",
             "必须尽量提供真实文本内容、文本角色、颜色、字号、行高、字距和对齐。",
@@ -1155,6 +1337,27 @@ export function buildNormalizedReconstructionAnalysis(
       warnings.push("vector-reconstruction 预期输出正视正交布局，当前 analysis 未显式声明 deprojected。");
     }
   }
+  if (job.input.strategy === "hybrid-reconstruction") {
+    if (!analysis.canonicalFrame?.fixedTargetFrame) {
+      warnings.push("hybrid-reconstruction 应保持 target frame 固定，当前 canonicalFrame 未明确固定。");
+    }
+    if (!analysis.canonicalFrame?.deprojected) {
+      warnings.push("hybrid-reconstruction 预期声明已去透视；当前 analysis 未显式声明 deprojected。");
+      warnings.push("当前 apply 仍不会执行真实 perspective warp；只会按 fixed-frame mapping 放置 raster base。");
+    }
+    if (analysis.canonicalFrame?.deprojected && (!analysis.canonicalFrame.sourceQuad || analysis.canonicalFrame.sourceQuad.length !== 4)) {
+      warnings.push("hybrid-reconstruction 标记了 deprojected=true，但 canonicalFrame.sourceQuad 缺失；当前只能做固定 frame 映射，不能做真实平面拉正。");
+    }
+    if (analysis.assetCandidates.length === 0) {
+      warnings.push("hybrid-reconstruction 当前没有资产/材质切片候选，材质区域很可能只能依赖 raster base。");
+    }
+    if (analysis.completionZones.length === 0 && job.input.allowOutpainting) {
+      warnings.push("allowOutpainting 已开启，但当前 analysis 没有声明 completionZones。");
+    }
+    if (analysis.completionZones.length > 0) {
+      warnings.push("completionZones 目前只进入 review / warning，不会自动生成补图素材。");
+    }
+  }
 
   const fontMatches =
     normalizeFontMatches(payload.fontMatches, analysis.textCandidates).length > 0
@@ -1166,6 +1369,8 @@ export function buildNormalizedReconstructionAnalysis(
   const rebuildPlan =
     job.input.strategy === "vector-reconstruction"
       ? buildVectorReconstructionPlan(job, analysis)
+      : job.input.strategy === "hybrid-reconstruction"
+        ? buildHybridReconstructionPlan(job, analysis)
       : buildPreviewOnlyPlan(job, analysis, fontMatches);
   const reviewFlags = uniqueReviewFlags(
     job.input.strategy === "vector-reconstruction"

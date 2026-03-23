@@ -23,6 +23,51 @@ export type PluginNodeSummary = {
   hasImageFill?: boolean;
 };
 
+export type PluginNodeInspection = PluginNodeSummary & {
+  depth: number;
+  childCount: number;
+  indexWithinParent: number;
+  visible?: boolean | null;
+  locked?: boolean | null;
+  opacity?: number | null;
+  rotation?: number | null;
+  strokes?: string[];
+  strokeStyleId?: string | null;
+  cornerRadius?: number | null;
+  clipsContent?: boolean | null;
+  isMask?: boolean | null;
+  maskType?: string | null;
+  constraintsHorizontal?: string | null;
+  constraintsVertical?: string | null;
+  layoutGrow?: number | null;
+  layoutAlign?: string | null;
+  layoutSizingHorizontal?: string | null;
+  layoutSizingVertical?: string | null;
+  primaryAxisSizingMode?: string | null;
+  counterAxisSizingMode?: string | null;
+  primaryAxisAlignItems?: string | null;
+  counterAxisAlignItems?: string | null;
+  itemSpacing?: number | null;
+  paddingLeft?: number | null;
+  paddingRight?: number | null;
+  paddingTop?: number | null;
+  paddingBottom?: number | null;
+  textContent?: string | null;
+  fontFamily?: string | null;
+  fontStyle?: string | null;
+  fontSize?: number | null;
+  fontWeight?: number | string | null;
+  lineHeight?: number | null;
+  letterSpacing?: number | null;
+  textAlignment?: string | null;
+  mainComponentId?: string | null;
+  mainComponentName?: string | null;
+  componentPropertyReferences?: string[];
+  componentPropertyDefinitionKeys?: string[];
+  variantProperties?: Record<string, string>;
+  generatedBy?: "reconstruction" | null;
+};
+
 export type PluginImageArtifact = {
   kind: "node-image";
   nodeId: string;
@@ -101,6 +146,7 @@ export type PluginCommandExecutionResult = {
   createdStyleIds: string[];
   createdVariableIds: string[];
   exportedImages: PluginImageArtifact[];
+  inspectedNodes: PluginNodeInspection[];
   warnings: string[];
   errorCode: string | null;
   message: string;
@@ -110,4 +156,18 @@ export type PluginCommandResultPayload = {
   resultMessage: string;
   ok: boolean;
   results?: PluginCommandExecutionResult[];
+};
+
+export type InspectFrameRequestPayload = {
+  targetSessionId: string;
+  frameNodeId: string;
+  maxDepth?: number;
+  includePreview?: boolean;
+};
+
+export type InspectFrameResponsePayload = {
+  sessionId: string;
+  frameNodeId: string;
+  nodes: PluginNodeInspection[];
+  preview: PluginImageArtifact | null;
 };
