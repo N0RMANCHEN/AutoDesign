@@ -1,4 +1,4 @@
-import type { PluginNodeSummary } from "./plugin-bridge.js";
+import type { PluginNodeInspection, PluginNodeSummary } from "./plugin-bridge.js";
 import type { FigmaCapabilityCommand } from "./plugin-contract.js";
 
 export const RECONSTRUCTION_STAGE_IDS = [
@@ -234,6 +234,96 @@ export type ReconstructionSemanticNode = {
   componentName: string | null;
 };
 
+export type ReconstructionElementKind =
+  | "surface"
+  | "text"
+  | "icon"
+  | "primitive"
+  | "group";
+
+export type ReconstructionElementEditableKind =
+  | "frame"
+  | "text"
+  | "shape"
+  | "vector"
+  | "group";
+
+export type ReconstructionElementStatus = "todo" | "drawing" | "review" | "locked";
+
+export type ReconstructionElementConstraintKind =
+  | "align-top"
+  | "align-bottom"
+  | "align-left"
+  | "align-right"
+  | "share-baseline"
+  | "share-typography"
+  | "same-parent"
+  | "padding-lock";
+
+export type ReconstructionElement = {
+  id: string;
+  kind: ReconstructionElementKind;
+  editableKind: ReconstructionElementEditableKind;
+  name: string;
+  parentId: string | null;
+  referenceBounds: ReconstructionBounds;
+  targetBounds: ReconstructionBounds | null;
+  analysisRefId: string | null;
+  content: string | null;
+  surfaceRefId: string | null;
+  textRefId: string | null;
+  primitiveRefId: string | null;
+  status: ReconstructionElementStatus;
+  inferred: boolean;
+  style: {
+    fillHex: string | null;
+    strokeHex: string | null;
+    strokeWeight: number | null;
+    opacity: number | null;
+    cornerRadius: number | null;
+    fontFamily: string | null;
+    fontStyle: string | null;
+    fontWeight: number | null;
+    fontSize: number | null;
+    lineHeight: number | null;
+    letterSpacing: number | null;
+    alignment: "left" | "center" | "right" | "justified" | null;
+    layoutMode: "NONE" | "HORIZONTAL" | "VERTICAL" | null;
+  };
+};
+
+export type ReconstructionElementConstraint = {
+  id: string;
+  kind: ReconstructionElementConstraintKind;
+  elementIds: string[];
+  axis: "x" | "y" | "both" | null;
+  targetValue: number | null;
+  tolerance: number | null;
+  hard: boolean;
+  inferred: boolean;
+  description: string;
+};
+
+export type ReconstructionElementScore = {
+  elementId: string;
+  elementName: string;
+  kind: ReconstructionElementKind;
+  inspectedNodeId: string | null;
+  matchStrategy: "analysis-ref" | "heuristic" | "missing";
+  referenceBounds: ReconstructionBounds;
+  targetBounds: ReconstructionBounds | null;
+  pixelScore: number;
+  geometryScore: number;
+  styleScore: number;
+  typographyScore: number;
+  alignmentScore: number;
+  editabilityScore: number;
+  compositeScore: number;
+  grade: ReconstructionDiffGrade;
+  hardFailures: string[];
+  notes: string[];
+};
+
 export type ReconstructionDesignTokens = {
   colors: {
     canvas: string | null;
@@ -276,6 +366,8 @@ export type ReconstructionAnalysis = {
   designSurfaces: ReconstructionDesignSurface[];
   vectorPrimitives: ReconstructionVectorPrimitive[];
   semanticNodes: ReconstructionSemanticNode[];
+  elements?: ReconstructionElement[];
+  elementConstraints?: ReconstructionElementConstraint[];
   designTokens: ReconstructionDesignTokens | null;
   completionPlan: ReconstructionCompletionSuggestion[];
   textCandidates: ReconstructionTextCandidate[];
@@ -435,6 +527,35 @@ export type ReconstructionJob = {
 
 export type ReconstructionJobSnapshot = {
   jobs: ReconstructionJob[];
+};
+
+export type ReconstructionGuideManifest = {
+  jobId: string;
+  targetFrame: {
+    id: string;
+    width: number | null;
+    height: number | null;
+  };
+  images: {
+    referencePreviewDataUrl: string | null;
+    rectifiedPreviewDataUrl: string | null;
+    renderedPreviewDataUrl: string | null;
+  };
+  elements: ReconstructionElement[];
+  constraints: ReconstructionElementConstraint[];
+};
+
+export type ReconstructionElementScoresPayload = {
+  inspectedNodes: PluginNodeInspection[];
+  renderedPreviewDataUrl?: string | null;
+  elementIds?: string[];
+};
+
+export type ReconstructionElementScoresResponse = {
+  jobId: string;
+  referencePreviewKind: "rectified" | "reference";
+  liveNodeCount: number;
+  scores: ReconstructionElementScore[];
 };
 
 export type CreateReconstructionJobPayload = {

@@ -221,6 +221,38 @@ test("reconstruction lifecycle persists raster preparation, apply, render, measu
   });
 });
 
+test("measurement warnings include design-core pass rejection notes when a pass does not improve", async () => {
+  await withTempStore(async (store) => {
+    const job = await store.createReconstructionJob(
+      {
+        targetSessionId: "session-1",
+        strategy: "vector-reconstruction",
+        maxIterations: 4,
+      },
+      createNode("target-1"),
+      createNode("reference-1"),
+    );
+
+    await store.markReconstructionMeasured(job.id, {
+      diffMetrics: createDiffMetrics({
+        compositeScore: 0.91,
+        grade: "B",
+      }),
+    });
+
+    const secondMeasured = await store.markReconstructionMeasured(job.id, {
+      diffMetrics: createDiffMetrics({
+        compositeScore: 0.905,
+        grade: "B",
+      }),
+    });
+
+    assert.equal(secondMeasured?.lastImprovement, -0.0050000000000000044);
+    assert.equal(secondMeasured?.stagnationCount, 1);
+    assert.ok(secondMeasured?.warnings.includes("当前 pass 提升未达到自动接受阈值。"));
+  });
+});
+
 test("analysis review flow updates approval state, rebuild plan font choices and preview-plan approval", async () => {
   await withTempStore(async (store) => {
     const job = await store.createReconstructionJob(
@@ -313,3 +345,81 @@ test("analysis review flow updates approval state, rebuild plan font choices and
     assert.ok(approved?.warnings.includes("Preview plan approved"));
   });
 });
+
+for (const strategy of ["vector-reconstruction", "hybrid-reconstruction"] as const) {
+  test(`${strategy} prepare preserves submitted structured analysis when adding reference raster`, async () => {
+    await withTempStore(async (store) => {
+      const job = await store.createReconstructionJob(
+        {
+          targetSessionId: "session-1",
+          strategy,
+        },
+        createNode("target-1"),
+        createNode("reference-1"),
+      );
+
+      const analyzed = await store.completeReconstructionAnalysis(job.id, {
+        analysisVersion: "2026-03-24-codex-structured-v1",
+        analysisProvider: "codex-assisted",
+        analysis: {
+          assetCandidates: [],
+        } as any,
+        fontMatches: [
+          {
+            textCandidateId: "text-1",
+            recommended: "Inter",
+            candidates: ["Inter", "SF Pro Display"],
+            rationale: "closest match",
+          },
+        ] as any,
+        rebuildPlan: {
+          previewOnly: false,
+          summary: ["Initial structured plan"],
+          ops: [
+            {
+              type: "capability",
+              capabilityId: "nodes.create-text",
+              payload: {
+                content: "Hello",
+                analysisRefId: "text-1",
+                fontFamily: "Inter",
+                fontSize: 24,
+              },
+            },
+          ],
+        },
+        reviewFlags: [],
+        warnings: ["analysis complete"],
+      });
+
+      assert.equal(analyzed?.approvalState, "approved");
+      assert.equal(analyzed?.currentStageId, "plan-rebuild");
+
+      const prepared =
+        strategy === "vector-reconstruction"
+          ? await store.prepareVectorReconstruction(job.id, {
+              referenceRaster: createReferenceRaster(),
+              warnings: ["reference raster prepared"],
+            })
+          : await store.prepareHybridReconstruction(job.id, {
+              referenceRaster: createReferenceRaster(),
+              warnings: ["reference raster prepared"],
+            });
+
+      assert.equal(prepared?.analysisVersion, "2026-03-24-codex-structured-v1");
+      assert.equal(prepared?.analysisProvider, "codex-assisted");
+      assert.equal(prepared?.approvalState, "approved");
+      assert.equal(prepared?.currentStageId, "plan-rebuild");
+      assert.equal(prepared?.analysis?.assetCandidates.length, 0);
+      assert.equal(prepared?.fontMatches.length, 1);
+      assert.equal(prepared?.rebuildPlan?.ops.length, 1);
+      assert.equal(prepared?.referenceRaster?.nodeId, "reference-1");
+      assert.equal(
+        prepared?.stages.find((stage) => stage.stageId === "plan-rebuild")?.status,
+        "completed",
+      );
+      assert.ok(prepared?.warnings.includes("analysis complete"));
+      assert.ok(prepared?.warnings.includes("reference raster prepared"));
+    });
+  });
+}

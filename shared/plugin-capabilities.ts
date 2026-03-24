@@ -73,6 +73,7 @@ export type PluginCapabilityPayloadMap = {
     fillHex?: string;
     cornerRadius?: number;
     parentNodeId?: string;
+    analysisRefId?: string;
   };
   "nodes.create-text": {
     name?: string;

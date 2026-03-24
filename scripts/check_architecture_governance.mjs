@@ -3,6 +3,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const rulesPath = path.join(root, "config/governance/architecture_rules.json");
+const todayIsoDate = new Date().toISOString().slice(0, 10);
 const ignoredDirs = new Set(["node_modules", ".git", ".next", "dist", "dist-server"]);
 const ignoredFilePattern = /\.(test|spec)\.(ts|tsx|js|mjs)$/;
 
@@ -42,6 +43,7 @@ function getScope(repoPath) {
   if (repoPath.startsWith("server/")) return "server";
   if (repoPath.startsWith("src/")) return "src";
   if (repoPath.startsWith("plugins/")) return "plugins";
+  if (repoPath.startsWith("scripts/")) return "scripts";
   return null;
 }
 
@@ -56,10 +58,67 @@ function parseImports(content) {
   return imports.filter(Boolean);
 }
 
+async function readJson(repoPath) {
+  return JSON.parse(await readFile(path.join(root, repoPath), "utf8"));
+}
+
+function normalizeLineLimitExceptions(registry, failures) {
+  const exceptions = new Map();
+  for (const [index, item] of (registry?.lineLimitExceptions ?? []).entries()) {
+    const repoPath = typeof item?.path === "string" ? item.path.trim() : "";
+    const owner = typeof item?.owner === "string" ? item.owner.trim() : "";
+    const reason = typeof item?.reason === "string" ? item.reason.trim() : "";
+    const expiresAt = typeof item?.expiresAt === "string" ? item.expiresAt.trim() : "";
+    const maxAllowed = Number(item?.maxAllowed);
+    const label = repoPath || `lineLimitExceptions[${index}]`;
+
+    if (!repoPath) {
+      failures.push(`invalid architecture exception path: ${label}`);
+      continue;
+    }
+    if (!owner) {
+      failures.push(`missing architecture exception owner: ${label}`);
+      continue;
+    }
+    if (!reason) {
+      failures.push(`missing architecture exception reason: ${label}`);
+      continue;
+    }
+    if (!expiresAt || !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) {
+      failures.push(`invalid architecture exception expiry: ${label}`);
+      continue;
+    }
+    if (!Number.isFinite(maxAllowed) || maxAllowed <= 0) {
+      failures.push(`invalid architecture exception maxAllowed: ${label}`);
+      continue;
+    }
+    if (expiresAt < todayIsoDate) {
+      failures.push(`expired architecture exception: ${repoPath} (expired ${expiresAt})`);
+      continue;
+    }
+    exceptions.set(repoPath, {
+      path: repoPath,
+      maxAllowed,
+      owner,
+      reason,
+      expiresAt,
+    });
+  }
+  return exceptions;
+}
+
 async function main() {
   const rules = JSON.parse(await readFile(rulesPath, "utf8"));
   const failures = [];
   const warnings = [];
+  const governedPrefixes = ["shared/", "server/", "src/", "plugins/", "scripts/"];
+  const exceptionRegistryPath =
+    typeof rules.exceptionRegistry === "string" && rules.exceptionRegistry.trim()
+      ? rules.exceptionRegistry.trim()
+      : null;
+  const exceptionRegistry = exceptionRegistryPath ? await readJson(exceptionRegistryPath) : {};
+  const lineLimitExceptions = normalizeLineLimitExceptions(exceptionRegistry, failures);
+  const usedExceptions = new Set();
 
   for (const repoPath of rules.requiredDocs ?? []) {
     if (!(await exists(repoPath))) {
@@ -76,11 +135,10 @@ async function main() {
   const files = await walk(root);
   const lineDefault = Number(rules.maxFileLines?.default ?? 800);
   const lineHard = Number(rules.maxFileLines?.hard ?? 2000);
-  const graceMap = rules.lineLimitGrace ?? {};
 
   for (const filePath of files) {
     const repoPath = toRepoPath(filePath);
-    if (!["shared/", "server/", "src/", "plugins/"].some((prefix) => repoPath.startsWith(prefix))) {
+    if (!governedPrefixes.some((prefix) => repoPath.startsWith(prefix))) {
       continue;
     }
     if (repoPath.includes("/dist/")) {
@@ -89,13 +147,15 @@ async function main() {
 
     const content = await readFile(filePath, "utf8");
     const lines = content.split("\n").length;
-    const grace = graceMap[repoPath];
-    if (grace) {
-      const maxAllowed = Number(grace.maxAllowed ?? lineHard);
-      if (lines > maxAllowed) {
-        failures.push(`line-limit grace exceeded: ${repoPath} (${lines} > ${maxAllowed})`);
+    const exception = lineLimitExceptions.get(repoPath);
+    if (exception) {
+      usedExceptions.add(repoPath);
+      if (lines > exception.maxAllowed) {
+        failures.push(`line-limit exception exceeded: ${repoPath} (${lines} > ${exception.maxAllowed})`);
       } else if (lines > lineDefault) {
-        warnings.push(`line-limit grace advisory: ${repoPath} (${lines} > ${lineDefault})`);
+        warnings.push(
+          `line-limit exception advisory: ${repoPath} (${lines} > ${lineDefault}; owner=${exception.owner}; expires=${exception.expiresAt})`,
+        );
       }
     } else if (lines > lineHard) {
       failures.push(`hard line-limit exceeded: ${repoPath} (${lines} > ${lineHard})`);
@@ -118,6 +178,15 @@ async function main() {
           failures.push(`forbidden dependency edge in ${repoPath}: ${specifier}`);
         }
       }
+    }
+  }
+
+  for (const [repoPath] of lineLimitExceptions) {
+    if (usedExceptions.has(repoPath)) {
+      continue;
+    }
+    if (!(await exists(repoPath))) {
+      failures.push(`orphaned architecture exception: ${repoPath}`);
     }
   }
 

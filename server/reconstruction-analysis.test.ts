@@ -169,3 +169,151 @@ test("buildNormalizedReconstructionAnalysis adds hybrid warnings for missing sou
     normalized.warnings.includes("allowOutpainting 已开启，但当前 analysis 没有声明 completionZones。"),
   );
 });
+
+test("buildNormalizedReconstructionAnalysis emits nested vector frame ops for surfaces and pill auto layout", () => {
+  const job = createJob("vector-reconstruction");
+  const normalized = buildNormalizedReconstructionAnalysis(job, {
+    analysis: {
+      designSurfaces: [
+        {
+          id: "surface-top-card",
+          name: "Top Card",
+          bounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.4 },
+          fillHex: "#6D6FD0",
+          cornerRadius: 28,
+          opacity: 1,
+          shadow: "soft",
+          inferred: false,
+        },
+        {
+          id: "surface-save-pill",
+          name: "Save Pill",
+          bounds: { x: 0.72, y: 0.62, width: 0.18, height: 0.2 },
+          fillHex: "#0C0C0D",
+          cornerRadius: 28,
+          opacity: 1,
+          shadow: "none",
+          inferred: false,
+        },
+      ],
+      vectorPrimitives: [
+        {
+          id: "primitive-top-divider",
+          kind: "line",
+          name: "Top Divider",
+          bounds: { x: 0.14, y: 0.28, width: 0.32, height: 0.01 },
+          points: [],
+          fillHex: null,
+          strokeHex: "#111111",
+          strokeWeight: 1,
+          opacity: 1,
+          cornerRadius: null,
+          svgMarkup: null,
+          inferred: false,
+        },
+      ],
+      textBlocks: [
+        {
+          id: "text-headline",
+          bounds: { x: 0.16, y: 0.18, width: 0.3, height: 0.12 },
+          role: "headline",
+          content: "to live with focus",
+          inferred: false,
+          fontFamily: "SF Pro Display",
+          fontStyle: "Medium",
+          fontWeight: 500,
+          fontSize: 25,
+          lineHeight: null,
+          letterSpacing: 0,
+          alignment: "left",
+          colorHex: "#111111",
+        },
+        {
+          id: "text-save",
+          bounds: { x: 0.76, y: 0.69, width: 0.08, height: 0.06 },
+          role: "body",
+          content: "Save",
+          inferred: false,
+          fontFamily: "SF Pro Text",
+          fontStyle: "Medium",
+          fontWeight: 500,
+          fontSize: 12,
+          lineHeight: 14,
+          letterSpacing: 0,
+          alignment: "left",
+          colorHex: "#F5F7FF",
+        },
+      ],
+      canonicalFrame: {
+        width: 160,
+        height: 100,
+        fixedTargetFrame: true,
+        deprojected: true,
+        mappingMode: "reflow",
+      },
+      screenPlane: {
+        extracted: true,
+        excludesNonUiShell: true,
+        confidence: 0.9,
+        sourceQuad: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 1, y: 1 },
+          { x: 0, y: 1 },
+        ],
+        rectifiedPreviewDataUrl: PNG_DATA_URL,
+      },
+    },
+  });
+
+  const createFrameOps = normalized.rebuildPlan.ops.filter(
+    (op) => op.type === "capability" && op.capabilityId === "nodes.create-frame",
+  );
+  assert.equal(createFrameOps.length, 2);
+
+  const layoutOps = normalized.rebuildPlan.ops.filter(
+    (op) => op.type === "capability" && op.capabilityId === "layout.configure-frame",
+  );
+  assert.equal(layoutOps.length, 2);
+  assert.equal(normalized.analysis.elements?.length, 5);
+  assert.ok((normalized.analysis.elementConstraints?.length || 0) >= 2);
+  const savePillLayout = layoutOps.find(
+    (op) =>
+      op.type === "capability" &&
+      op.capabilityId === "layout.configure-frame" &&
+      op.nodeIds?.[0] === "analysis:surface-save-pill",
+  );
+  assert.ok(savePillLayout);
+  assert.equal(
+    (savePillLayout?.payload as Record<string, unknown>).layoutMode,
+    "VERTICAL",
+  );
+
+  const headlineTextOp = normalized.rebuildPlan.ops.find(
+    (op) =>
+      op.type === "capability" &&
+      op.capabilityId === "nodes.create-text" &&
+      (op.payload as Record<string, unknown>).analysisRefId === "text-headline",
+  );
+  assert.ok(headlineTextOp);
+  assert.equal(
+    (headlineTextOp?.payload as Record<string, unknown>).parentNodeId,
+    "analysis:surface-top-card",
+  );
+  assert.equal((headlineTextOp?.payload as Record<string, unknown>).x, 10);
+  assert.equal((headlineTextOp?.payload as Record<string, unknown>).y, 8);
+
+  const saveTextOp = normalized.rebuildPlan.ops.find(
+    (op) =>
+      op.type === "capability" &&
+      op.capabilityId === "nodes.create-text" &&
+      (op.payload as Record<string, unknown>).analysisRefId === "text-save",
+  );
+  assert.ok(saveTextOp);
+  assert.equal(
+    (saveTextOp?.payload as Record<string, unknown>).parentNodeId,
+    "analysis:surface-save-pill",
+  );
+  assert.equal("x" in ((saveTextOp?.payload as Record<string, unknown>) || {}), false);
+  assert.equal("y" in ((saveTextOp?.payload as Record<string, unknown>) || {}), false);
+});

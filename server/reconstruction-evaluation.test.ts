@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRefineSuggestions, createRenderedPreview } from "./reconstruction-evaluation.js";
+import {
+  buildRefineSuggestions,
+  createRenderedPreview,
+  measureElementDiff,
+} from "./reconstruction-evaluation.js";
 import type {
   ReconstructionAcceptanceGate,
   ReconstructionDiffMetrics,
@@ -140,6 +144,18 @@ test("createRenderedPreview keeps mime type and target dimensions", () => {
   assert.equal(preview.width, 1440);
   assert.equal(preview.height, 900);
   assert.match(preview.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("measureElementDiff supports normalized crop bounds", async () => {
+  const diff = await measureElementDiff(PNG_DATA_URL, PNG_DATA_URL, {
+    x: 0,
+    y: 0,
+    width: 0.5,
+    height: 0.5,
+  });
+
+  assert.equal(diff.compositeScore, 1);
+  assert.equal(diff.grade, "A");
 });
 
 test("buildRefineSuggestions emits fill and layout nudges for failing color and layout gates", () => {

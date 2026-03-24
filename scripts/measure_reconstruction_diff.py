@@ -226,15 +226,49 @@ def score_grade(composite, gates):
     return "F"
 
 
+def parse_crop_bounds(argv):
+    if "--crop" not in argv:
+        return None
+    index = argv.index("--crop")
+    if index + 1 >= len(argv):
+        raise SystemExit("--crop requires a JSON payload")
+    payload = json.loads(argv[index + 1])
+    return {
+        "x": clamp(float(payload.get("x", 0.0)), 0.0, 1.0),
+        "y": clamp(float(payload.get("y", 0.0)), 0.0, 1.0),
+        "width": clamp(float(payload.get("width", 0.0)), 0.0, 1.0),
+        "height": clamp(float(payload.get("height", 0.0)), 0.0, 1.0),
+    }
+
+
+def crop_image(image, bounds):
+    if not bounds:
+        return image
+
+    width, height = image.size
+    left = int(round(bounds["x"] * width))
+    top = int(round(bounds["y"] * height))
+    right = int(round((bounds["x"] + bounds["width"]) * width))
+    bottom = int(round((bounds["y"] + bounds["height"]) * height))
+    left = clamp(left, 0, width - 1)
+    top = clamp(top, 0, height - 1)
+    right = clamp(right, left + 1, width)
+    bottom = clamp(bottom, top + 1, height)
+    return image.crop((left, top, right, bottom))
+
+
 def main():
     if len(sys.argv) < 3:
         raise SystemExit("usage: measure_reconstruction_diff.py <reference-image> <rendered-image>")
 
     reference_path = Path(sys.argv[1])
     rendered_path = Path(sys.argv[2])
+    crop_bounds = parse_crop_bounds(sys.argv[3:])
 
     reference = Image.open(reference_path).convert("RGB")
     rendered = Image.open(rendered_path).convert("RGB").resize(reference.size)
+    reference = crop_image(reference, crop_bounds)
+    rendered = crop_image(rendered, crop_bounds).resize(reference.size)
 
     global_difference = mean_abs_diff(reference, rendered) / 255.0
     global_similarity = round(clamp(1.0 - global_difference, 0.0, 1.0), 4)

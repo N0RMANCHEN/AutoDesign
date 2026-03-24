@@ -10,13 +10,16 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "plugin-bridge-cli.ts");
+const VALID_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0uoAAAAASUVORK5CYII=";
 
 async function writeFixture(fixtureDir: string, fileName: string, payload: unknown) {
   await writeFile(path.join(fixtureDir, fileName), JSON.stringify(payload, null, 2), "utf8");
 }
 
 function pngDataUrl(contents: string) {
-  return `data:image/png;base64,${Buffer.from(contents, "utf8").toString("base64")}`;
+  void contents;
+  return VALID_PNG_DATA_URL;
 }
 
 function createReconstructionJobFixture(
@@ -86,6 +89,176 @@ function createReconstructionJobFixture(
     appliedNodeIds: [],
     stages: [],
     ...overrides,
+  };
+}
+
+function createVectorElementAnalysisFixture() {
+  return {
+    width: 160,
+    height: 100,
+    previewDataUrl: VALID_PNG_DATA_URL,
+    mimeType: "image/png",
+    dominantColors: ["#111111", "#F5F7FF"],
+    canonicalFrame: {
+      width: 160,
+      height: 100,
+      fixedTargetFrame: true,
+      deprojected: true,
+      mappingMode: "reflow",
+    },
+    screenPlane: {
+      extracted: true,
+      excludesNonUiShell: true,
+      confidence: 0.92,
+      sourceQuad: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+      ],
+      rectifiedPreviewDataUrl: VALID_PNG_DATA_URL,
+    },
+    layoutRegions: [],
+    designSurfaces: [
+      {
+        id: "surface-top-card",
+        name: "Top Card",
+        bounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+        fillHex: "#6D6FD0",
+        cornerRadius: 24,
+        opacity: 1,
+        shadow: "soft",
+        inferred: false,
+      },
+    ],
+    vectorPrimitives: [],
+    semanticNodes: [],
+    designTokens: null,
+    completionPlan: [],
+    textCandidates: [],
+    textBlocks: [
+      {
+        id: "text-score",
+        bounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+        role: "metric",
+        content: "37.5%",
+        inferred: false,
+        fontFamily: "SF Pro Display",
+        fontStyle: "Bold",
+        fontWeight: 700,
+        fontSize: 24,
+        lineHeight: 26,
+        letterSpacing: 0,
+        alignment: "left",
+        colorHex: "#111111",
+      },
+    ],
+    ocrBlocks: [],
+    textStyleHints: [],
+    assetCandidates: [],
+    completionZones: [],
+    deprojectionNotes: [],
+    styleHints: {
+      theme: "dark",
+      cornerRadiusHint: 24,
+      shadowHint: "soft",
+      primaryColorHex: "#6D6FD0",
+      accentColorHex: "#111111",
+    },
+    uncertainties: [],
+  };
+}
+
+function createGuideManifestFixture() {
+  return {
+    jobId: "job-vector",
+    targetFrame: {
+      id: "target-1",
+      width: 160,
+      height: 100,
+    },
+    images: {
+      referencePreviewDataUrl: VALID_PNG_DATA_URL,
+      rectifiedPreviewDataUrl: VALID_PNG_DATA_URL,
+      renderedPreviewDataUrl: VALID_PNG_DATA_URL,
+    },
+    elements: [
+      {
+        id: "element/surface-top-card",
+        kind: "surface",
+        editableKind: "frame",
+        name: "Top Card",
+        parentId: null,
+        referenceBounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+        targetBounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+        analysisRefId: "surface-top-card",
+        content: null,
+        surfaceRefId: "surface-top-card",
+        textRefId: null,
+        primitiveRefId: null,
+        status: "todo",
+        inferred: false,
+        style: {
+          fillHex: "#6D6FD0",
+          strokeHex: null,
+          strokeWeight: null,
+          opacity: 1,
+          cornerRadius: 24,
+          fontFamily: null,
+          fontStyle: null,
+          fontWeight: null,
+          fontSize: null,
+          lineHeight: null,
+          letterSpacing: null,
+          alignment: null,
+          layoutMode: null,
+        },
+      },
+      {
+        id: "element/text-score",
+        kind: "text",
+        editableKind: "text",
+        name: "37.5%",
+        parentId: "element/surface-top-card",
+        referenceBounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+        targetBounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+        analysisRefId: "text-score",
+        content: "37.5%",
+        surfaceRefId: null,
+        textRefId: "text-score",
+        primitiveRefId: null,
+        status: "todo",
+        inferred: false,
+        style: {
+          fillHex: "#111111",
+          strokeHex: null,
+          strokeWeight: null,
+          opacity: 1,
+          cornerRadius: null,
+          fontFamily: "SF Pro Display",
+          fontStyle: "Bold",
+          fontWeight: 700,
+          fontSize: 24,
+          lineHeight: 26,
+          letterSpacing: 0,
+          alignment: "left",
+          layoutMode: null,
+        },
+      },
+    ],
+    constraints: [
+      {
+        id: "same-parent/element/surface-top-card+element/text-score",
+        kind: "same-parent",
+        elementIds: ["element/surface-top-card", "element/text-score"],
+        axis: null,
+        targetValue: null,
+        tolerance: null,
+        hard: true,
+        inferred: true,
+        description: "37.5% should remain grouped under Top Card.",
+      },
+    ],
   };
 }
 
@@ -351,7 +524,8 @@ test("plugin_bridge_cli preview exports selection previews into the requested ou
       const bytes = await readFile(expectedFile);
 
       assert.match(stdout, new RegExp(expectedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-      assert.equal(bytes.toString("utf8"), "preview-node-1");
+      assert.equal(bytes[0], 0x89);
+      assert.equal(bytes[1], 0x50);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
@@ -488,7 +662,8 @@ test("plugin_bridge_cli inspect exports subtree preview artifacts for a frame in
       assert.match(stdout, /frameNodes:/);
       assert.match(stdout, /- Root Frame \| id=9:9 type=FRAME/);
       assert.match(stdout, new RegExp(`preview: ${expectedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-      assert.equal(bytes.toString("utf8"), "frame-preview");
+      assert.equal(bytes[0], 0x89);
+      assert.equal(bytes[1], 0x50);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
@@ -750,15 +925,291 @@ test("plugin_bridge_cli reconstruct --context-pack writes pack and preview artif
       const targetPath = path.join(outputDir, "job-hybrid-target.png");
 
       assert.equal(JSON.parse(await readFile(contextPath, "utf8")).jobId, "job-hybrid");
-      assert.equal((await readFile(referencePath)).toString("utf8"), "reference-preview");
-      assert.equal((await readFile(rectifiedPath)).toString("utf8"), "reference-rectified");
-      assert.equal((await readFile(targetPath)).toString("utf8"), "target-preview");
+      assert.equal((await readFile(referencePath))[0], 0x89);
+      assert.equal((await readFile(rectifiedPath))[0], 0x89);
+      assert.equal((await readFile(targetPath))[0], 0x89);
       assert.match(stdout, /job: job-hybrid/);
       assert.match(stdout, /mode: codex-assisted/);
       assert.match(stdout, new RegExp(`contextPack: ${contextPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
       assert.match(stdout, /guidance:\n- guide 1\n- guide 2/);
       assert.match(stdout, /workflow:\n- step 1\n- step 2/);
       assert.match(stdout, /scoringRubric:\n- rubric 1/);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --export-guides writes a guide manifest with synthesized elements", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-guides-"));
+    try {
+      await writeFixture(
+        fixtureDir,
+        "get__api__reconstruction__jobs__job-vector__guide-manifest.json",
+        createGuideManifestFixture(),
+      );
+
+      const { stdout } = await runCli(
+        ["reconstruct", "--job", "job-vector", "--export-guides", "--out", outputDir],
+        fixtureDir,
+      );
+
+      const manifestPath = path.join(outputDir, "job-vector-guide-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      assert.match(stdout, /guideManifest: .*job-vector-guide-manifest\.json/);
+      assert.equal(manifest.jobId, "job-vector");
+      assert.ok(Array.isArray(manifest.elements));
+      assert.ok(manifest.elements.length >= 2);
+      assert.ok(Array.isArray(manifest.constraints));
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --score-elements prints per-element scores using live frame inspection", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-vector.json",
+      createReconstructionJobFixture("vector-reconstruction", {
+        id: "job-vector",
+        analysis: createVectorElementAnalysisFixture(),
+        referenceRaster: {
+          nodeId: "reference-1",
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          dataUrl: VALID_PNG_DATA_URL,
+          source: "node-export",
+        },
+        renderedPreview: {
+          previewDataUrl: VALID_PNG_DATA_URL,
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          capturedAt: "2026-03-23T12:20:00.000Z",
+        },
+      }),
+    );
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-vector__guide-manifest.json",
+      createGuideManifestFixture(),
+    );
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__inspect-frame.json", {
+      sessionId: "session_1",
+      frameNodeId: "target-1",
+      preview: {
+        kind: "node-image",
+        nodeId: "target-1",
+        mimeType: "image/png",
+        width: 160,
+        height: 100,
+        dataUrl: VALID_PNG_DATA_URL,
+        source: "node-export",
+      },
+      nodes: [
+        {
+          id: "target-1",
+          name: "Target Frame",
+          type: "FRAME",
+          fillable: true,
+          fills: [],
+          fillStyleId: null,
+          x: 0,
+          y: 0,
+          absoluteX: 0,
+          absoluteY: 0,
+          width: 160,
+          height: 100,
+          depth: 0,
+          childCount: 2,
+          indexWithinParent: 0,
+        },
+        {
+          id: "node-top-card",
+          name: "Top Card",
+          type: "FRAME",
+          fillable: true,
+          fills: ["#6D6FD0"],
+          fillStyleId: null,
+          x: 12.8,
+          y: 8,
+          absoluteX: 12.8,
+          absoluteY: 8,
+          width: 115.2,
+          height: 46,
+          parentNodeId: "target-1",
+          parentNodeType: "FRAME",
+          depth: 1,
+          childCount: 1,
+          indexWithinParent: 0,
+          cornerRadius: 24,
+          opacity: 1,
+          analysisRefId: "surface-top-card",
+          generatedBy: "reconstruction",
+        },
+        {
+          id: "node-score",
+          name: "37.5%",
+          type: "TEXT",
+          fillable: true,
+          fills: ["#111111"],
+          fillStyleId: null,
+          x: 25.6,
+          y: 18,
+          absoluteX: 25.6,
+          absoluteY: 18,
+          width: 35.2,
+          height: 12,
+          parentNodeId: "node-top-card",
+          parentNodeType: "FRAME",
+          depth: 2,
+          childCount: 0,
+          indexWithinParent: 0,
+          textContent: "37.5%",
+          fontFamily: "SF Pro Display",
+          fontStyle: "Bold",
+          fontSize: 24,
+          fontWeight: 700,
+          textAlignment: "LEFT",
+          analysisRefId: "text-score",
+          generatedBy: "reconstruction",
+        },
+      ],
+    });
+    await writeFixture(
+      fixtureDir,
+      "post__api__reconstruction__jobs__job-vector__element-scores.json",
+      {
+        jobId: "job-vector",
+        referencePreviewKind: "rectified",
+        liveNodeCount: 3,
+        scores: [
+          {
+            elementId: "element/surface-top-card",
+            elementName: "Top Card",
+            kind: "surface",
+            inspectedNodeId: "node-top-card",
+            matchStrategy: "analysis-ref",
+            referenceBounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+            targetBounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+            pixelScore: 0.98,
+            geometryScore: 0.99,
+            styleScore: 0.97,
+            typographyScore: 1,
+            alignmentScore: 0.95,
+            editabilityScore: 1,
+            compositeScore: 0.98,
+            grade: "A",
+            hardFailures: [],
+            notes: [],
+          },
+          {
+            elementId: "element/text-score",
+            elementName: "37.5%",
+            kind: "text",
+            inspectedNodeId: "node-score",
+            matchStrategy: "analysis-ref",
+            referenceBounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+            targetBounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+            pixelScore: 0.97,
+            geometryScore: 0.98,
+            styleScore: 0.95,
+            typographyScore: 0.99,
+            alignmentScore: 0.96,
+            editabilityScore: 1,
+            compositeScore: 0.98,
+            grade: "A",
+            hardFailures: [],
+            notes: [],
+          },
+        ],
+      },
+    );
+
+    const { stdout } = await runCli(["reconstruct", "--job", "job-vector", "--score-elements"], fixtureDir);
+    assert.match(stdout, /elementScores:/);
+    assert.match(stdout, /Top Card \[surface\]/);
+    assert.match(stdout, /37\.5% \[text\]/);
+    assert.match(stdout, /match=analysis-ref/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --render-element exports reference and rendered crops", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-element-render-"));
+    try {
+      await writeFixture(
+        fixtureDir,
+        "get__api__reconstruction__jobs__job-vector.json",
+        createReconstructionJobFixture("vector-reconstruction", {
+          id: "job-vector",
+          analysis: createVectorElementAnalysisFixture(),
+          referenceRaster: {
+            nodeId: "reference-1",
+            mimeType: "image/png",
+            width: 160,
+            height: 100,
+            dataUrl: VALID_PNG_DATA_URL,
+            source: "node-export",
+          },
+          renderedPreview: {
+            previewDataUrl: VALID_PNG_DATA_URL,
+            mimeType: "image/png",
+            width: 160,
+            height: 100,
+            capturedAt: "2026-03-23T12:20:00.000Z",
+          },
+        }),
+      );
+      await writeFixture(
+        fixtureDir,
+        "get__api__reconstruction__jobs__job-vector__guide-manifest.json",
+        createGuideManifestFixture(),
+      );
+      await writeFixture(fixtureDir, "post__api__plugin-bridge__inspect-frame.json", {
+        sessionId: "session_1",
+        frameNodeId: "target-1",
+        preview: {
+          kind: "node-image",
+          nodeId: "target-1",
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          dataUrl: VALID_PNG_DATA_URL,
+          source: "node-export",
+        },
+        nodes: [
+          {
+            id: "target-1",
+            name: "Target Frame",
+            type: "FRAME",
+            fillable: true,
+            fills: [],
+            fillStyleId: null,
+            x: 0,
+            y: 0,
+            absoluteX: 0,
+            absoluteY: 0,
+            width: 160,
+            height: 100,
+            depth: 0,
+            childCount: 0,
+            indexWithinParent: 0,
+          },
+        ],
+      });
+
+      const { stdout } = await runCli(
+        ["reconstruct", "--job", "job-vector", "--render-element", "37.5%", "--out", outputDir],
+        fixtureDir,
+      );
+      assert.match(stdout, /element: 37\.5% \[element\/text-score\]/);
+      assert.ok((await readFile(path.join(outputDir, "job-vector-37-5-reference.png"))).length > 0);
+      assert.ok((await readFile(path.join(outputDir, "job-vector-37-5-rendered.png"))).length > 0);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }

@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "lineLimitExceptions": [
+    {
+      "path": "plugins/autodesign/src/runtime/capability-runner.ts",
+      "maxAllowed": 3300,
+      "owner": "plugin-runtime",
+      "reason": "Capability families are still concentrated here until runtime actions are split by domain.",
+      "expiresAt": "2026-06-30"
+    },
+    {
+      "path": "server/index.ts",
+      "maxAllowed": 2800,
+      "owner": "server-platform",
+      "reason": "HTTP route orchestration is still consolidated until reconstruction and design-task routes move behind dedicated modules.",
+      "expiresAt": "2026-06-30"
+    },
+    {
+      "path": "scripts/plugin-bridge-cli.ts",
+      "maxAllowed": 2800,
+      "owner": "tooling",
+      "reason": "The reconstruction CLI is still concentrated while HTTP-only transport boundaries are being introduced incrementally.",
+      "expiresAt": "2026-06-30"
+    }
+  ]
+}

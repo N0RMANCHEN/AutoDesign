@@ -13,8 +13,10 @@
     "reports/README.md",
     "config/governance/product_boundary_truth.json",
     "config/governance/doc_code_consistency_rules.json",
+    "config/governance/architecture_exceptions.json",
     "config/governance/runtime_write_registry.json"
   ],
+  "exceptionRegistry": "config/governance/architecture_exceptions.json",
   "requiredDirs": [
     "src",
     "server",
@@ -30,28 +32,6 @@
   "maxFileLines": {
     "default": 800,
     "hard": 2000
-  },
-  "lineLimitGrace": {
-    "plugins/autodesign/src/runtime/capability-runner.ts": {
-      "maxAllowed": 3300,
-      "reason": "capability surface is still concentrated here until capability families are split"
-    },
-    "server/index.ts": {
-      "maxAllowed": 2800,
-      "reason": "HTTP routes and orchestration are still consolidated in a single entrypoint"
-    },
-    "server/reconstruction-analysis.ts": {
-      "maxAllowed": 1900,
-      "reason": "reconstruction analysis pipeline has not yet been partitioned"
-    },
-    "server/reconstruction-store.ts": {
-      "maxAllowed": 1300,
-      "reason": "job normalization and persistence are still co-located"
-    },
-    "shared/plugin-command-composer.ts": {
-      "maxAllowed": 950,
-      "reason": "natural language command mapping has not yet been split by capability family"
-    }
   },
   "dependencyRules": [
     {
@@ -92,6 +72,17 @@
         "../../src/",
         "../../../server/",
         "../../../src/"
+      ]
+    },
+    {
+      "scope": "scripts",
+      "forbid": [
+        "../server/",
+        "../src/",
+        "../plugins/",
+        "../../server/",
+        "../../src/",
+        "../../plugins/"
       ]
     }
   ]

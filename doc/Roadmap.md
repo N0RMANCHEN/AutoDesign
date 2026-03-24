@@ -1,6 +1,6 @@
 # AutoDesign Roadmap
 
-- 更新日期：2026-03-23
+- 更新日期：2026-03-24
 - 维护规则：本文件只保留当前执行真相，不保留历史流水；已完成事项应移出 active list，并在 `doc/plans/archive/`、`CHANGELOG.md` 或 `reports/` 留痕。
 
 ## 1. 治理规则
@@ -11,7 +11,7 @@
 
 ## 2. 当前执行面板
 
-- `current_focus`: `文档治理体系落地 + 架构边界收紧 + reconstruction workflow 稳定化 + 测试验收补强`
+- `current_focus`: `文档治理体系落地 + design-core 主干迁移 + reconstruction workflow 稳定化 + plugin runtime / bridge CLI 降污 + 测试验收补强`
 - `plugin_runtime`: `active`
 - `workspace_runtime`: `active`
 - `bridge_runtime`: `active`
@@ -39,8 +39,9 @@
 - 目标：继续收紧三大运行面边界，减少职责漂移和跨层耦合
 - Plan：[workspace-plugin-architecture-hardening.md](plans/workspace-plugin-architecture-hardening.md)
 - 当前重点：
-  - 写入方向和共享协议治理
-  - subtree inspection 与结构写入能力补全
+  - design-task / design-core 继续从 reconstruction compatibility 提升为通用主干
+  - server / plugin / scripts / shared 的大文件继续拆成 contracts / adapters / routes / services
+  - plugin runtime 与 bridge CLI 的职责边界继续收紧，并维持共享协议不漂移
   - plugin / server / shared 的测试门槛补齐
 
 ### R3 Reconstruction Workflow 稳定化
@@ -49,9 +50,9 @@
 - 目标：把参考图回归链路收紧成“先看、再比、单局部修改、复看、再打分”的可编辑主链
 - Plan：[reconstruction-workflow-hardening.md](plans/reconstruction-workflow-hardening.md)
 - 当前重点：
-  - 目标 Frame 清旧层
-  - inspect / render / measure / refine 闭环稳定
-  - 结构优先、可编辑优先、栅格仅用于诊断
+  - reconstruction facade 继续兼容，但 analysis / elements / scoring / iteration policy 已开始共用 design-core
+  - inspect / render / measure / refine / loop 闭环继续以单区域迭代、逐元素评分、score diff 和 stop reason 为主线收紧
+  - guide manifest、element scoring、局部 crop 评分、结构优先与可编辑优先继续作为稳定边界
 
 ### R4 测试与验收体系补强
 
@@ -59,8 +60,8 @@
 - 目标：把 `Test-Standards` 真正落成可执行的测试与验收链，不再只停留在规范层
 - Plan：[testing-and-acceptance-hardening.md](plans/testing-and-acceptance-hardening.md)
 - 当前重点：
-  - capability / inspect / reconstruction 的必测场景补齐
-  - `test:unit` 收口 shared targeting、CLI guard、capability registry、governance scripts、prompt composition、context pack、runtime action、project storage、plugin bridge store、reconstruction analysis contract 与 reconstruction store lifecycle 的纯逻辑回归
+  - capability / inspect / reconstruction / design-core / plugin runtime command handlers / bridge CLI reconstruct 的必测场景补齐
+  - `test:unit` 收口 shared targeting、CLI guard、capability registry、governance scripts、prompt composition、context pack、runtime action、project storage、plugin bridge store、reconstruction analysis contract、element model / scoring、reconstruction store lifecycle、execution service 与 plugin runtime helpers / handlers 的纯逻辑回归
   - `reports/acceptance` 和 `reports/quality` 的实际使用
   - 发布前和回归后的验收模板沉淀
 
@@ -77,8 +78,9 @@
 ## 3. 当前风险
 
 - 文档治理刚完成重建，后续如不持续维护，仍会重新退化为重复事实和失效入口
-- reconstruction 仍处在高变动阶段，评分和 refine workflow 需要继续收紧
+- reconstruction 仍处在高变动阶段，评分、iteration policy 和 refine workflow 需要继续收紧
 - structure-first 的目标已明确，但 component / instance / auto layout 的写能力还需持续补齐
+- plugin runtime 与 bridge CLI 虽已明显降污，但 reconstruct 子命令与共享 command composer 仍是剩余热点
 - 测试标准和报告层已经建立，但自动化验证与真实验收沉淀仍不完整
 
 ## 4. Archive Handoff

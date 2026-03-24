@@ -16,7 +16,7 @@
     "acceptance:preflight": "node scripts/create-acceptance-preflight.mjs",
     "acceptance:prep": "node scripts/prepare-live-acceptance.mjs",
     "verify:docs": "node scripts/verify-docs.mjs",
-    "test:unit": "node --test --import tsx server/*.test.ts shared/*.test.ts scripts/*.test.ts",
+    "test:unit": "node --test --import tsx server/*.test.ts shared/*.test.ts scripts/*.test.ts plugins/autodesign/src/runtime/*.test.ts",
     "check:product-boundary": "node scripts/check_product_boundary_truth.mjs",
     "check:doc-consistency": "node scripts/check_doc_code_consistency.mjs",
     "check:roadmap-reports": "node scripts/check_roadmap_reports_consistency.mjs",

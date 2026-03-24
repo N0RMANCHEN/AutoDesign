@@ -167,6 +167,61 @@ export async function measurePreviewDiff(
   }
 }
 
+export async function measureElementDiff(
+  referencePreviewDataUrl: string,
+  renderedPreviewDataUrl: string,
+  cropBounds: ReconstructionBounds,
+): Promise<ReconstructionDiffMetrics> {
+  const reference = parsePreviewDataUrl(referencePreviewDataUrl);
+  const rendered = parsePreviewDataUrl(renderedPreviewDataUrl);
+  const referencePath = path.join(
+    os.tmpdir(),
+    `autodesign-element-reference-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extensionForMimeType(reference.mimeType)}`,
+  );
+  const renderedPath = path.join(
+    os.tmpdir(),
+    `autodesign-element-rendered-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extensionForMimeType(rendered.mimeType)}`,
+  );
+
+  await writeFile(referencePath, reference.bytes);
+  await writeFile(renderedPath, rendered.bytes);
+
+  try {
+    const scriptPath = path.join(process.cwd(), "scripts", "measure_reconstruction_diff.py");
+    const { stdout } = await execFileAsync(
+      "python3",
+      [
+        scriptPath,
+        referencePath,
+        renderedPath,
+        "--crop",
+        JSON.stringify(normalizeBounds(cropBounds)),
+      ],
+      {
+        maxBuffer: 1024 * 1024 * 4,
+      },
+    );
+    const payload = JSON.parse(stdout);
+    return {
+      globalSimilarity: clampScore(payload?.globalSimilarity),
+      colorDelta: clampScore(payload?.colorDelta),
+      edgeSimilarity: clampScore(payload?.edgeSimilarity),
+      layoutSimilarity: clampScore(payload?.layoutSimilarity),
+      structureSimilarity: clampScore(payload?.structureSimilarity),
+      hotspotAverage: clampScore(payload?.hotspotAverage),
+      hotspotPeak: clampScore(payload?.hotspotPeak),
+      hotspotCoverage: clampScore(payload?.hotspotCoverage),
+      compositeScore: clampScore(payload?.compositeScore),
+      grade: normalizeGrade(payload?.grade),
+      acceptanceGates: normalizeAcceptanceGates(payload?.acceptanceGates),
+      hotspots: normalizeHotspots(payload?.hotspots),
+    };
+  } finally {
+    await rm(referencePath, { force: true });
+    await rm(renderedPath, { force: true });
+  }
+}
+
 function regionForHotspot(job: ReconstructionJob, hotspot: ReconstructionDiffHotspot) {
   return (
     job.analysis?.layoutRegions.find((region) => {

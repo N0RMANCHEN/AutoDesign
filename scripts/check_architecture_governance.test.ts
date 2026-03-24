@@ -30,16 +30,26 @@ async function writeRules(tempDir: string) {
   const rules = {
     requiredDocs: ["README.md", "doc/Guide.md"],
     requiredDirs: ["shared", "server", "plugins/autodesign", "scripts"],
+    exceptionRegistry: "config/governance/architecture_exceptions.json",
     maxFileLines: { default: 10, hard: 20 },
     dependencyRules: [
       { scope: "shared", forbid: ["../server/"] },
       { scope: "server", forbid: ["../plugins/"] },
       { scope: "plugins", forbid: ["../../server/"] },
+      { scope: "scripts", forbid: ["../server/"] },
     ],
   };
   await writeFile(
     path.join(tempDir, "config", "governance", "architecture_rules.json"),
     JSON.stringify(rules, null, 2),
+    "utf8",
+  );
+}
+
+async function writeExceptions(tempDir: string, payload?: unknown) {
+  await writeFile(
+    path.join(tempDir, "config", "governance", "architecture_exceptions.json"),
+    JSON.stringify(payload ?? { version: "1.0.0", lineLimitExceptions: [] }, null, 2),
     "utf8",
   );
 }
@@ -50,15 +60,18 @@ async function writeCommonFixture(tempDir: string) {
   await writeFile(path.join(tempDir, "shared", "local.ts"), "export const local = 1;\n", "utf8");
   await writeFile(path.join(tempDir, "server", "local.ts"), "export const local = 1;\n", "utf8");
   await writeFile(path.join(tempDir, "plugins", "autodesign", "local.ts"), "export const local = 1;\n", "utf8");
+  await writeFile(path.join(tempDir, "scripts", "local.ts"), "export const local = 1;\n", "utf8");
 }
 
 test("check_architecture_governance passes when required docs, dirs and dependency edges are valid", async () => {
   await withTempRepo(async (tempDir) => {
     await writeRules(tempDir);
+    await writeExceptions(tempDir);
     await writeCommonFixture(tempDir);
     await writeFile(path.join(tempDir, "shared", "ok.ts"), 'import "./local";\nexport const value = local;\n', "utf8");
     await writeFile(path.join(tempDir, "server", "ok.ts"), 'import "./local";\nexport const value = local;\n', "utf8");
     await writeFile(path.join(tempDir, "plugins", "autodesign", "ok.ts"), 'import "./local";\nexport const value = local;\n', "utf8");
+    await writeFile(path.join(tempDir, "scripts", "ok.ts"), 'import "./local";\nexport const value = local;\n', "utf8");
 
     const { stdout } = await execFileAsync(process.execPath, [scriptPath], { cwd: tempDir });
     assert.match(stdout, /governance:check passed/);
@@ -68,6 +81,7 @@ test("check_architecture_governance passes when required docs, dirs and dependen
 test("check_architecture_governance fails when a forbidden dependency edge appears", async () => {
   await withTempRepo(async (tempDir) => {
     await writeRules(tempDir);
+    await writeExceptions(tempDir);
     await writeCommonFixture(tempDir);
     await writeFile(path.join(tempDir, "shared", "bad.ts"), 'import "../server/local";\nexport const value = 1;\n', "utf8");
 
@@ -86,6 +100,7 @@ test("check_architecture_governance fails when a forbidden dependency edge appea
 test("check_architecture_governance fails when a file exceeds the hard line limit", async () => {
   await withTempRepo(async (tempDir) => {
     await writeRules(tempDir);
+    await writeExceptions(tempDir);
     await writeCommonFixture(tempDir);
     const oversized = `${Array.from({ length: 21 }, (_, index) => `export const line${index} = ${index};`).join("\n")}\n`;
     await writeFile(path.join(tempDir, "server", "huge.ts"), oversized, "utf8");
@@ -96,6 +111,54 @@ test("check_architecture_governance fails when a file exceeds the hard line limi
         const stderr = String(error.stderr || "");
         assert.match(stderr, /governance:check failed/);
         assert.match(stderr, /hard line-limit exceeded: server\/huge\.ts \(22 > 20\)/);
+        return true;
+      },
+    );
+  });
+});
+
+test("check_architecture_governance fails when scripts import server internals", async () => {
+  await withTempRepo(async (tempDir) => {
+    await writeRules(tempDir);
+    await writeExceptions(tempDir);
+    await writeCommonFixture(tempDir);
+    await writeFile(path.join(tempDir, "scripts", "bad.ts"), 'import "../server/local";\nexport const value = 1;\n', "utf8");
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [scriptPath], { cwd: tempDir }),
+      (error: any) => {
+        const stderr = String(error.stderr || "");
+        assert.match(stderr, /forbidden dependency edge in scripts\/bad\.ts: \.\.\/server\/local/);
+        return true;
+      },
+    );
+  });
+});
+
+test("check_architecture_governance fails when a line-limit exception is expired", async () => {
+  await withTempRepo(async (tempDir) => {
+    await writeRules(tempDir);
+    await writeExceptions(tempDir, {
+      version: "1.0.0",
+      lineLimitExceptions: [
+        {
+          path: "server/legacy.ts",
+          maxAllowed: 50,
+          owner: "architecture",
+          reason: "Temporary oversized file during migration",
+          expiresAt: "2025-01-01",
+        },
+      ],
+    });
+    await writeCommonFixture(tempDir);
+    const oversized = `${Array.from({ length: 25 }, (_, index) => `export const line${index} = ${index};`).join("\n")}\n`;
+    await writeFile(path.join(tempDir, "server", "legacy.ts"), oversized, "utf8");
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [scriptPath], { cwd: tempDir }),
+      (error: any) => {
+        const stderr = String(error.stderr || "");
+        assert.match(stderr, /expired architecture exception: server\/legacy\.ts \(expired 2025-01-01\)/);
         return true;
       },
     );

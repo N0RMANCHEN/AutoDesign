@@ -27,6 +27,7 @@ export type PluginNodeInspection = PluginNodeSummary & {
   depth: number;
   childCount: number;
   indexWithinParent: number;
+  analysisRefId?: string | null;
   visible?: boolean | null;
   locked?: boolean | null;
   opacity?: number | null;

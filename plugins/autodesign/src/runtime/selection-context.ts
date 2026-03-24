@@ -46,6 +46,9 @@ const RADIUS_CAPABLE_TYPES = new Set([
   "RECTANGLE",
 ]);
 
+const ANALYSIS_REF_SHARED_NAMESPACE = "autodesign";
+const ANALYSIS_REF_SHARED_KEY = "analysisRef";
+
 export function normalizeHex(input: string) {
   const value = String(input || "").trim().replace(/^#/, "");
   if (!/^[\da-fA-F]{3}$|^[\da-fA-F]{6}$/.test(value)) {
@@ -343,6 +346,17 @@ function readTextMetric(node: any, key: "fontSize" | "lineHeight" | "letterSpaci
   return null;
 }
 
+function readAnalysisRefId(node: any) {
+  if (!node || typeof node.getSharedPluginData !== "function") {
+    return null;
+  }
+  const value = node.getSharedPluginData(
+    ANALYSIS_REF_SHARED_NAMESPACE,
+    ANALYSIS_REF_SHARED_KEY,
+  );
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function isReconstructionGeneratedNode(node: any) {
   const name = typeof node?.name === "string" ? node.name : "";
   return (
@@ -374,6 +388,7 @@ export function inspectNodeSubtree(root: any, options?: { maxDepth?: number }) {
       childCount:
         "children" in node && Array.isArray(node.children) ? node.children.length : 0,
       indexWithinParent: indexWithinParent >= 0 ? indexWithinParent : 0,
+      analysisRefId: readAnalysisRefId(node),
       visible: typeof node?.visible === "boolean" ? node.visible : null,
       locked: typeof node?.locked === "boolean" ? node.locked : null,
       opacity: readOpacity(node),

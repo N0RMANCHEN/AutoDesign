@@ -25,7 +25,8 @@
       "id": "reconstruction_jobs",
       "path": "data/autodesign-reconstruction-jobs.json",
       "allowedWriters": [
-        "server/reconstruction-store.ts"
+        "server/reconstruction-store.ts",
+        "server/adapters/reconstruction-job-repository.ts"
       ]
     }
   ]
