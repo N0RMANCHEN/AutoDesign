@@ -47,6 +47,18 @@ test("buildWorkspaceReadModel narrows project data into a workspace-facing read 
     mappingNames: ["Welcome Hero Card", "Button / Primary"],
     reviewTitles: ["欢迎页文案层级是否与实现组件树一致"],
   });
+  assert.deepEqual(readModel.libraryAssets[0], {
+    id: "asset-welcome-hero-illustration",
+    name: "Welcome Hero Illustration",
+    kind: "illustration",
+    sourceId: "source-mobile-banking",
+    sourceName: "Mobile Banking App",
+    summary: "Onboarding 首屏使用的品牌插图，强调渐变背景与银行场景可信度。",
+    keywords: ["onboarding", "hero", "gradient", "mobile-banking"],
+    screenNames: ["Onboarding / Welcome"],
+    mappingNames: ["Welcome Hero Card"],
+    reviewTitles: ["欢迎页文案层级是否与实现组件树一致"],
+  });
   assert.deepEqual(readModel.mappings[2]?.screenNames, [
     "Buttons / States",
     "Onboarding / Welcome",

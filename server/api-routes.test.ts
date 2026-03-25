@@ -419,6 +419,8 @@ test("api_routes expose workspace read model, support workspace figma sync and r
     assert.equal(initialWorkspace.response.status, 200);
     assert.equal(initialWorkspace.body.workspace.id, "autodesign-main");
     assert.ok(Array.isArray(initialWorkspace.body.designSources) && initialWorkspace.body.designSources.length > 0);
+    assert.equal(initialWorkspace.body.libraryAssets[0]?.id, "asset-welcome-hero-illustration");
+    assert.equal(initialWorkspace.body.libraryAssets[0]?.mappingIds, undefined);
     assert.equal(initialWorkspace.body.designScreens, undefined);
     assert.equal(initialWorkspace.body.componentMappings, undefined);
 
@@ -448,6 +450,16 @@ test("api_routes expose workspace read model, support workspace figma sync and r
             notes: "对齐支付前账单摘要结构。",
           },
         ],
+        assets: [
+          {
+            name: "Billing Hero Illustration",
+            kind: "illustration",
+            summary: "账单确认页头图，用于连调封面视觉。",
+            keywords: ["billing", "hero", "checkout"],
+            screenNames: ["Billing / Review"],
+            mappingDesignNames: ["Billing Summary Card"],
+          },
+        ],
       }),
     });
     assert.equal(synced.response.status, 200);
@@ -456,6 +468,13 @@ test("api_routes expose workspace read model, support workspace figma sync and r
     assert.ok(
       synced.body.mappings.some(
         (mapping: { id: string }) => mapping.id === "mapping-billing-summary-card",
+      ),
+    );
+    assert.ok(
+      synced.body.libraryAssets.some(
+        (asset: { id: string; mappingNames: string[] }) =>
+          asset.id === "asset-billing-hero-illustration" &&
+          asset.mappingNames.includes("Billing Summary Card"),
       ),
     );
     assert.equal(synced.body.designScreens, undefined);
@@ -495,6 +514,8 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
     assert.equal(workspace.body.designSources[0]?.mappingCount, 3);
     assert.equal(workspace.body.screens[0]?.id, "screen-onboarding");
     assert.equal(workspace.body.screens[0]?.sourceName, "Mobile Banking App");
+    assert.equal(workspace.body.libraryAssets[2]?.kind, "component");
+    assert.deepEqual(workspace.body.libraryAssets[2]?.mappingNames, ["Button / Primary"]);
     assert.deepEqual(workspace.body.screens[0]?.mappingNames, [
       "Welcome Hero Card",
       "Button / Primary",
@@ -534,6 +555,36 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
   });
 });
 
+test("api_routes expose workspace library asset search without leaking raw asset relation ids", async () => {
+  await withInMemoryServer(async (server) => {
+    const response = await requestJson<any>(server, "/api/workspace/library-assets/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: "button loading",
+        kind: "component",
+      }),
+    });
+
+    assert.equal(response.response.status, 200);
+    assert.equal(response.body.query, "button loading");
+    assert.equal(response.body.kind, "component");
+    assert.equal(response.body.total, 1);
+    assert.deepEqual(response.body.results.map((asset: { id: string }) => asset.id), [
+      "asset-primary-button-library",
+    ]);
+    assert.equal(response.body.results[0]?.screenIds, undefined);
+    assert.equal(response.body.results[0]?.mappingIds, undefined);
+
+    const invalidKind = await requestJson<any>(server, "/api/workspace/library-assets/search", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "texture",
+      }),
+    });
+    assert.equal(invalidKind.response.status, 400);
+  });
+});
+
 test("api_routes expose workspace-scoped figma sync and reset surfaces", async () => {
   await withInMemoryServer(async (server) => {
     const synced = await requestJson<any>(server, "/api/workspace/figma-sync", {
@@ -562,6 +613,16 @@ test("api_routes expose workspace-scoped figma sync and reset surfaces", async (
             notes: "对齐支付前账单摘要结构。",
           },
         ],
+        assets: [
+          {
+            name: "Billing Hero Illustration",
+            kind: "illustration",
+            summary: "账单确认页头图，用于连调封面视觉。",
+            keywords: ["billing", "hero", "checkout"],
+            screenNames: ["Billing / Review"],
+            mappingDesignNames: ["Billing Summary Card"],
+          },
+        ],
       }),
     });
 
@@ -574,6 +635,9 @@ test("api_routes expose workspace-scoped figma sync and reset surfaces", async (
     assert.ok(
       synced.body.selection.options.some((item: { id: string }) => item.id === "screen-billing-review"),
     );
+    assert.ok(
+      synced.body.libraryAssets.some((asset: { id: string }) => asset.id === "asset-billing-hero-illustration"),
+    );
 
     const reset = await requestJson<any>(server, "/api/workspace/reset", {
       method: "POST",
@@ -583,6 +647,10 @@ test("api_routes expose workspace-scoped figma sync and reset surfaces", async (
     assert.equal(reset.body.designSources[0]?.id, "source-mobile-banking");
     assert.equal(
       reset.body.mappings.some((mapping: { id: string }) => mapping.id === "mapping-billing-summary-card"),
+      false,
+    );
+    assert.equal(
+      reset.body.libraryAssets.some((asset: { id: string }) => asset.id === "asset-billing-hero-illustration"),
       false,
     );
   });

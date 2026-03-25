@@ -56,6 +56,7 @@ function createProject(): ProjectData {
         relatedIds: ["screen-1", "mapping-1"],
       },
     ],
+    libraryAssets: [],
     runtimeSessions: [],
   };
 }

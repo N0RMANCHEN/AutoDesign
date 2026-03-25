@@ -1,6 +1,8 @@
 export type SyncStatus = "connected" | "draft" | "stale";
 export type MappingStatus = "planned" | "prototype" | "verified";
 export type ReviewStatus = "todo" | "doing" | "done";
+export const libraryAssetKinds = ["component", "icon", "illustration"] as const;
+export type LibraryAssetKind = (typeof libraryAssetKinds)[number];
 export type GraphKind = "codegraph" | "knowledge";
 export type RuntimeAction =
   | "codegraph/summarize"
@@ -57,6 +59,17 @@ export type ReviewItem = {
   relatedIds: string[];
 };
 
+export type LibraryAsset = {
+  id: string;
+  sourceId: string;
+  name: string;
+  kind: LibraryAssetKind;
+  summary: string;
+  keywords: string[];
+  screenIds: string[];
+  mappingIds: string[];
+};
+
 export type RuntimeSession = {
   id: string;
   graphKind: GraphKind;
@@ -72,6 +85,7 @@ export type ProjectData = {
   designScreens: DesignScreen[];
   componentMappings: ComponentMapping[];
   reviewItems: ReviewItem[];
+  libraryAssets: LibraryAsset[];
   runtimeSessions: RuntimeSession[];
 };
 
@@ -125,7 +139,15 @@ export type FigmaSyncPayload = {
     designName: string;
     reactName: string;
     props: string[];
-    states: string[];
-    notes: string;
+      states: string[];
+      notes: string;
+  }>;
+  assets?: Array<{
+    name: string;
+    kind: LibraryAssetKind;
+    summary: string;
+    keywords: string[];
+    screenNames: string[];
+    mappingDesignNames: string[];
   }>;
 };

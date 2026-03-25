@@ -56,6 +56,16 @@ const defaultSyncPayload = JSON.stringify(
         notes: "同步后默认落成 prototype 状态，等待人工确认。",
       },
     ],
+    assets: [
+      {
+        name: "Payment Hero Illustration",
+        kind: "illustration",
+        summary: "支付确认页使用的头图资产，约束欢迎区的视觉基调。",
+        keywords: ["payment", "hero", "confirmation"],
+        screenNames: ["Payment / Confirm"],
+        mappingDesignNames: ["Payment Confirm Card"],
+      },
+    ],
   },
   null,
   2,

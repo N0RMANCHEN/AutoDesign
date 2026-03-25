@@ -115,6 +115,38 @@ export const seededProject: ProjectData = {
       relatedIds: ["source-mobile-banking", "mapping-button-primary"],
     },
   ],
+  libraryAssets: [
+    {
+      id: "asset-welcome-hero-illustration",
+      sourceId: "source-mobile-banking",
+      name: "Welcome Hero Illustration",
+      kind: "illustration",
+      summary: "Onboarding 首屏使用的品牌插图，强调渐变背景与银行场景可信度。",
+      keywords: ["onboarding", "hero", "gradient", "mobile-banking"],
+      screenIds: ["screen-onboarding"],
+      mappingIds: ["mapping-hero-card"],
+    },
+    {
+      id: "asset-account-quick-action-icons",
+      sourceId: "source-mobile-banking",
+      name: "Account Quick Action Icons",
+      kind: "icon",
+      summary: "Dashboard 快捷操作区的图标组，约束 20px 网格和双色填充规则。",
+      keywords: ["dashboard", "icons", "quick-actions", "duotone"],
+      screenIds: ["screen-dashboard"],
+      mappingIds: ["mapping-account-tile"],
+    },
+    {
+      id: "asset-primary-button-library",
+      sourceId: "source-design-system",
+      name: "Primary Button Library",
+      kind: "component",
+      summary: "按钮组件的主状态资产，包含 leading icon、loading 和 disabled 变体。",
+      keywords: ["buttons", "states", "primary", "design-system"],
+      screenIds: ["screen-button-system", "screen-onboarding"],
+      mappingIds: ["mapping-button-primary"],
+    },
+  ],
   runtimeSessions: [
     {
       id: "session-summary-1",

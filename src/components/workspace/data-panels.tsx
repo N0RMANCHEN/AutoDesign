@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { filterWorkspaceLibraryAssetCards } from "../../../shared/workspace-library-assets";
 import type { WorkspaceReadModel } from "../../../shared/workspace-read-model";
 import { Panel } from "./panel";
 import { StatusPill } from "./status-pill";
@@ -55,6 +58,11 @@ export function WorkspaceDataColumns(props: {
     syncPayload,
     workspaceModel,
   } = props;
+  const [assetQuery, setAssetQuery] = useState("");
+  const visibleLibraryAssets = filterWorkspaceLibraryAssetCards({
+    assets: workspaceModel.libraryAssets,
+    query: assetQuery,
+  });
 
   return (
     <>
@@ -122,6 +130,69 @@ export function WorkspaceDataColumns(props: {
                 </div>
               </article>
             ))}
+          </div>
+        </Panel>
+
+        <Panel title="资产库" description="按 narrowed asset catalog 查看组件、图标和插图资产。">
+          <div className="stack-list">
+            <label className="field" htmlFor="workspace-library-asset-search">
+              <span>Search Assets</span>
+              <input
+                className="status-select"
+                id="workspace-library-asset-search"
+                onChange={(event) => setAssetQuery(event.target.value)}
+                placeholder="搜索名称、关键字、screen 或 mapping"
+                type="text"
+                value={assetQuery}
+              />
+            </label>
+            <p className="muted-line">
+              {assetQuery.trim()
+                ? `匹配 ${visibleLibraryAssets.length} / ${workspaceModel.libraryAssets.length} 个资产。`
+                : `当前资产目录共 ${workspaceModel.libraryAssets.length} 项。`}
+            </p>
+            {visibleLibraryAssets.length > 0 ? (
+              <div className="stack-list">
+                {visibleLibraryAssets.map((asset) => (
+                  <article className="data-card" key={asset.id}>
+                    <div className="data-card-head">
+                      <div>
+                        <h3>{asset.name}</h3>
+                        <p className="muted-line">{asset.sourceName}</p>
+                      </div>
+                      <span className="owner-tag">{asset.kind}</span>
+                    </div>
+                    <p>{asset.summary}</p>
+                    <div className="token-row">
+                      {asset.keywords.map((keyword) => (
+                        <span className="token" key={`${asset.id}-keyword-${keyword}`}>
+                          keyword: {keyword}
+                        </span>
+                      ))}
+                      {asset.screenNames.map((screenName) => (
+                        <span className="token token-accent" key={`${asset.id}-screen-${screenName}`}>
+                          screen: {screenName}
+                        </span>
+                      ))}
+                      {asset.mappingNames.map((mappingName) => (
+                        <span className="token" key={`${asset.id}-mapping-${mappingName}`}>
+                          mapping: {mappingName}
+                        </span>
+                      ))}
+                      {asset.reviewTitles.map((reviewTitle) => (
+                        <span className="token" key={`${asset.id}-review-${reviewTitle}`}>
+                          review: {reviewTitle}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="data-card">
+                <p className="muted-line">当前筛选没有命中任何资产。</p>
+              </div>
+            )}
           </div>
         </Panel>
 

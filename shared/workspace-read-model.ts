@@ -4,6 +4,8 @@ import type {
   ReviewStatus,
   SyncStatus,
 } from "./types.js";
+import type { WorkspaceLibraryAssetCard } from "./workspace-library-assets.js";
+import { buildWorkspaceLibraryAssetCards } from "./workspace-library-assets.js";
 
 export type WorkspaceSelectionOptionKind =
   | "designSource"
@@ -75,6 +77,7 @@ export type WorkspaceReadModel = {
   };
   designSources: WorkspaceDesignSourceCard[];
   screens: WorkspaceScreenCard[];
+  libraryAssets: WorkspaceLibraryAssetCard[];
   mappings: WorkspaceMappingCard[];
   reviewQueue: WorkspaceReviewQueueCard[];
 };
@@ -134,6 +137,7 @@ function buildWorkspaceReviewQueueCard(params: {
   project.designSources.forEach((item) => relatedLookup.set(item.id, item.name));
   project.designScreens.forEach((item) => relatedLookup.set(item.id, item.name));
   project.componentMappings.forEach((item) => relatedLookup.set(item.id, item.designName));
+  project.libraryAssets.forEach((item) => relatedLookup.set(item.id, item.name));
   project.reviewItems.forEach((item) => relatedLookup.set(item.id, item.title));
 
   return {
@@ -246,6 +250,7 @@ export function buildWorkspaceReadModel(project: ProjectData): WorkspaceReadMode
     screens: project.designScreens.map((screen) =>
       buildWorkspaceScreenCard({ project, screen }),
     ),
+    libraryAssets: buildWorkspaceLibraryAssetCards(project),
     mappings: project.componentMappings.map((mapping) =>
       buildWorkspaceMappingCard({ project, mapping }),
     ),

@@ -1,12 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type {
-  FigmaSyncPayload,
-  MappingStatus,
-  ProjectData,
-  ReviewStatus,
+import {
+  libraryAssetKinds,
+  type FigmaSyncPayload,
+  type LibraryAssetKind,
+  type MappingStatus,
+  type ProjectData,
+  type ReviewStatus,
 } from "../../shared/types.js";
 import { nowIso, slugify } from "../../shared/utils.js";
+import { buildWorkspaceLibraryAssetSearchResponse } from "../../shared/workspace-library-assets.js";
 import {
   buildWorkspaceMappingStatusReceipt,
   buildWorkspaceReadModel,
@@ -15,6 +18,10 @@ import {
 import { readBody, sendJson } from "../http-utils.js";
 import { readProject, resetProject, writeProject } from "../storage.js";
 import type { RequestContext } from "./request-context.js";
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
 
 function applyFigmaSyncPayload(params: {
   project: ProjectData;
@@ -74,11 +81,42 @@ function applyFigmaSyncPayload(params: {
     }
   });
 
+  const nextLibraryAssets =
+    Array.isArray(payload.assets)
+      ? payload.assets.map((asset) => {
+          const screenIds = uniqueStrings(
+            asset.screenNames.map((screenName) => `screen-${slugify(screenName)}`),
+          ).filter((screenId) =>
+            nextScreens.some((screen) => screen.id === screenId && screen.sourceId === sourceId),
+          );
+          const mappingIds = uniqueStrings(
+            asset.mappingDesignNames.map((mappingName) => `mapping-${slugify(mappingName)}`),
+          ).filter((mappingId) =>
+            nextMappings.some((mapping) => mapping.id === mappingId),
+          );
+
+          return {
+            id: `asset-${slugify(asset.name)}`,
+            sourceId,
+            name: asset.name,
+            kind: asset.kind,
+            summary: asset.summary,
+            keywords: uniqueStrings(asset.keywords),
+            screenIds,
+            mappingIds,
+          };
+        })
+      : project.libraryAssets.filter((asset) => asset.sourceId === sourceId);
+
   return {
     ...project,
     designSources: nextSources,
     designScreens: nextScreens,
     componentMappings: nextMappings,
+    libraryAssets: [
+      ...project.libraryAssets.filter((asset) => asset.sourceId !== sourceId),
+      ...nextLibraryAssets,
+    ],
   };
 }
 
@@ -148,6 +186,39 @@ async function handleWorkspaceMappingStatus(
     buildWorkspaceMappingStatusReceipt({
       project: saved,
       mapping: savedMapping,
+    }),
+  );
+}
+
+async function handleWorkspaceLibraryAssetSearch(
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  const body = await readBody<{
+    query?: string;
+    kind?: LibraryAssetKind;
+    sourceId?: string;
+    limit?: number;
+  }>(request);
+
+  if (body.kind !== undefined && !libraryAssetKinds.includes(body.kind)) {
+    sendJson(response, 400, {
+      ok: false,
+      error: `kind must be one of ${libraryAssetKinds.join(", ")}`,
+    });
+    return;
+  }
+
+  const project = await readProject();
+  sendJson(
+    response,
+    200,
+    buildWorkspaceLibraryAssetSearchResponse({
+      project,
+      query: body.query,
+      kind: body.kind,
+      sourceId: typeof body.sourceId === "string" ? body.sourceId.trim() || undefined : undefined,
+      limit: body.limit,
     }),
   );
 }
@@ -250,6 +321,11 @@ export async function tryHandleWorkspaceRoute(
 
   if (context.pathname === "/api/workspace/review-queue-item" && context.method === "POST") {
     await handleWorkspaceReviewQueueItem(request, response);
+    return true;
+  }
+
+  if (context.pathname === "/api/workspace/library-assets/search" && context.method === "POST") {
+    await handleWorkspaceLibraryAssetSearch(request, response);
     return true;
   }
 
