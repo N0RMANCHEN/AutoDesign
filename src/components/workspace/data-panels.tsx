@@ -90,6 +90,41 @@ export function WorkspaceDataColumns(props: {
           </div>
         </Panel>
 
+        <Panel title="设计页面" description="按 screen catalog 查看设计页面、关联映射与评审入口。">
+          <div className="stack-list">
+            {workspaceModel.screens.map((screen) => (
+              <article className="data-card" key={screen.id}>
+                <div className="data-card-head">
+                  <div>
+                    <h3>{screen.name}</h3>
+                    <p className="muted-line">{screen.sourceName}</p>
+                  </div>
+                  <span className="owner-tag">{screen.id}</span>
+                </div>
+                <p>{screen.summary}</p>
+                <div className="token-row">
+                  <span className="token token-accent">purpose: {screen.purpose}</span>
+                  {screen.stateNotes.map((state) => (
+                    <span className="token" key={`${screen.id}-state-${state}`}>
+                      state: {state}
+                    </span>
+                  ))}
+                  {screen.mappingNames.map((mappingName) => (
+                    <span className="token" key={`${screen.id}-mapping-${mappingName}`}>
+                      mapping: {mappingName}
+                    </span>
+                  ))}
+                  {screen.reviewTitles.map((reviewTitle) => (
+                    <span className="token" key={`${screen.id}-review-${reviewTitle}`}>
+                      review: {reviewTitle}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+
         <Panel title="页面与组件映射" description="把设计页面和 React 目标组件放在同一处核对。">
           <div className="stack-list">
             {workspaceModel.mappings.map((mapping) => (

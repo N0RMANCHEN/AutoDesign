@@ -33,6 +33,7 @@
 - 新增 [workspace-read-model.ts](shared/workspace-read-model.ts)、[workspace-read-model.test.ts](shared/workspace-read-model.test.ts) 和 [workspace-routes.ts](server/routes/workspace-routes.ts) 的 workspace read/write contract；workspace 的 design source、mapping、review queue 和默认 selection 现在通过 `/api/workspace/read-model` 读取，`mapping-status`、`figma-sync`、`reset` 也改走窄化 write surface，而不是直接消费 `/api/project`
 - [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 现在会把 `design-context` 的 stale key 绑定到 `workspace.updatedAt`，避免 sync / reset / mapping status 更新后继续误用旧 context snapshot
 - [workspace-read-model.ts](shared/workspace-read-model.ts)、[workspace-routes.ts](server/routes/workspace-routes.ts) 和 [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 现在还补上了 review queue 的窄写面：`POST /api/workspace/review-queue-item` 只接收 `status / owner` 更新并返回 narrowed receipt，workspace UI 不再需要理解原始 `ReviewItem` 才能推进评审流
+- [workspace-read-model.ts](shared/workspace-read-model.ts)、[workspace-read-model.test.ts](shared/workspace-read-model.test.ts)、[data-panels.tsx](src/components/workspace/data-panels.tsx) 和 [server/api-routes.test.ts](server/api-routes.test.ts) 现在把 design screen truth 收成显式 `screens` catalog，workspace 不再需要从泛化 `selection.options` 或原始 `designScreens` 结构里回推页面摘要、关联映射和评审入口
 
 ## 2026-03-23
 

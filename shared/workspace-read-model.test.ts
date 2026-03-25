@@ -37,6 +37,16 @@ test("buildWorkspaceReadModel narrows project data into a workspace-facing read 
     screenCount: 2,
     mappingCount: 3,
   });
+  assert.deepEqual(readModel.screens[0], {
+    id: "screen-onboarding",
+    name: "Onboarding / Welcome",
+    sourceName: "Mobile Banking App",
+    purpose: "验证欢迎页的层级、引导卡片与 CTA 状态。",
+    summary: "首屏强调信息密度控制和 CTA 对齐，是连调入口页。",
+    stateNotes: ["default", "loading", "error-inline"],
+    mappingNames: ["Welcome Hero Card", "Button / Primary"],
+    reviewTitles: ["欢迎页文案层级是否与实现组件树一致"],
+  });
   assert.deepEqual(readModel.mappings[2]?.screenNames, [
     "Buttons / States",
     "Onboarding / Welcome",

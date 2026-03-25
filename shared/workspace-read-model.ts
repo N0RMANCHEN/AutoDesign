@@ -30,6 +30,17 @@ export type WorkspaceDesignSourceCard = {
   mappingCount: number;
 };
 
+export type WorkspaceScreenCard = {
+  id: string;
+  name: string;
+  sourceName: string;
+  purpose: string;
+  summary: string;
+  stateNotes: string[];
+  mappingNames: string[];
+  reviewTitles: string[];
+};
+
 export type WorkspaceMappingCard = {
   id: string;
   designName: string;
@@ -63,6 +74,7 @@ export type WorkspaceReadModel = {
     options: WorkspaceSelectionOption[];
   };
   designSources: WorkspaceDesignSourceCard[];
+  screens: WorkspaceScreenCard[];
   mappings: WorkspaceMappingCard[];
   reviewQueue: WorkspaceReviewQueueCard[];
 };
@@ -137,6 +149,36 @@ function buildWorkspaceReviewQueueCard(params: {
   };
 }
 
+function buildWorkspaceScreenCard(params: {
+  project: ProjectData;
+  screen: ProjectData["designScreens"][number];
+}): WorkspaceScreenCard {
+  const { project, screen } = params;
+  const sourceName =
+    project.designSources.find((item) => item.id === screen.sourceId)?.name ?? screen.sourceId;
+  const mappingNames = uniqueStrings(
+    project.componentMappings
+      .filter((item) => item.screenIds.includes(screen.id))
+      .map((item) => item.designName),
+  );
+  const reviewTitles = uniqueStrings(
+    project.reviewItems
+      .filter((item) => item.relatedIds.includes(screen.id))
+      .map((item) => item.title),
+  );
+
+  return {
+    id: screen.id,
+    name: screen.name,
+    sourceName,
+    purpose: screen.purpose,
+    summary: screen.summary,
+    stateNotes: screen.stateNotes,
+    mappingNames,
+    reviewTitles,
+  };
+}
+
 export function buildWorkspaceReadModel(project: ProjectData): WorkspaceReadModel {
   const sourceScreenCounts = new Map<string, number>();
   const sourceMappingCounts = new Map<string, number>();
@@ -201,6 +243,9 @@ export function buildWorkspaceReadModel(project: ProjectData): WorkspaceReadMode
       screenCount: sourceScreenCounts.get(source.id) ?? 0,
       mappingCount: sourceMappingCounts.get(source.id) ?? 0,
     })),
+    screens: project.designScreens.map((screen) =>
+      buildWorkspaceScreenCard({ project, screen }),
+    ),
     mappings: project.componentMappings.map((mapping) =>
       buildWorkspaceMappingCard({ project, mapping }),
     ),

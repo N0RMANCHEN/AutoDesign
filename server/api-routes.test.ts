@@ -471,6 +471,12 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
     ]);
     assert.equal(workspace.body.designSources[0]?.screenCount, 2);
     assert.equal(workspace.body.designSources[0]?.mappingCount, 3);
+    assert.equal(workspace.body.screens[0]?.id, "screen-onboarding");
+    assert.equal(workspace.body.screens[0]?.sourceName, "Mobile Banking App");
+    assert.deepEqual(workspace.body.screens[0]?.mappingNames, [
+      "Welcome Hero Card",
+      "Button / Primary",
+    ]);
     assert.deepEqual(workspace.body.mappings[2]?.screenNames, [
       "Buttons / States",
       "Onboarding / Welcome",
@@ -480,6 +486,7 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
       "Welcome Hero Card",
     ]);
     assert.equal(workspace.body.runtimeSessions, undefined);
+    assert.equal(workspace.body.designScreens, undefined);
     assert.equal(workspace.body.componentMappings, undefined);
     assert.equal(workspace.body.reviewItems, undefined);
 
