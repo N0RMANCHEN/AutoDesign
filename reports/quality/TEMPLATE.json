@@ -12,9 +12,7 @@
   "findings": [
     "Primary conclusion"
   ],
-  "artifacts": [
-    "reports/quality/quality-20260101-000000.md"
-  ],
+  "artifacts": [],
   "follow_up": [
     "Optional next action"
   ]

@@ -21,7 +21,7 @@
       "pattern": "^[0-9]{8}-[0-9]{6}$"
     },
     "status": {
-      "enum": ["PASS", "FAIL"]
+      "enum": ["PENDING", "PASS", "FAIL"]
     },
     "scope": {
       "type": "string",

@@ -17,9 +17,17 @@ async function writeFixture(fixtureDir: string, fileName: string, payload: unkno
   await writeFile(path.join(fixtureDir, fileName), JSON.stringify(payload, null, 2), "utf8");
 }
 
+async function writeBinaryFixture(fixtureDir: string, fileName: string, contents: Buffer) {
+  await writeFile(path.join(fixtureDir, fileName), contents);
+}
+
 function pngDataUrl(contents: string) {
   void contents;
   return VALID_PNG_DATA_URL;
+}
+
+function pngBuffer() {
+  return Buffer.from(VALID_PNG_DATA_URL.split(",")[1], "base64");
 }
 
 function createReconstructionJobFixture(
@@ -278,6 +286,7 @@ async function runCli(args: string[], fixtureDir?: string) {
       ? {
           ...process.env,
           AUTODESIGN_API_FIXTURE_DIR: fixtureDir,
+          AUTODESIGN_RECONSTRUCT_FIXTURE_DIR: fixtureDir,
         }
       : process.env,
   });
@@ -433,6 +442,436 @@ test("plugin_bridge_cli send allows read-only commands without explicit nodeIds"
     assert.match(stdout, /queued: cmd_read_only/);
     assert.match(stdout, /"capabilityId": "selection\.refresh"/);
     assert.doesNotMatch(stdout, /"nodeIds": \[/);
+  });
+});
+
+test("plugin_bridge_cli send composes prompt-driven rename commands without falling through to fill warnings", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "nodes.rename" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Old Card",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_rename",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "把名字改成 HeroCard", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_rename/);
+    assert.match(stdout, /notes:\n- 已生成重命名命令：HeroCard。/);
+    assert.match(stdout, /"capabilityId": "nodes\.rename"/);
+    assert.match(stdout, /"name": "HeroCard"/);
+    assert.doesNotMatch(stdout, /无法从这句里识别填充颜色/);
+  });
+});
+
+test("plugin_bridge_cli send composes compound text prompts into multiple capability commands", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "text.set-content" }, { id: "text.set-font-family" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Body Copy",
+              type: "TEXT",
+              fills: ["#111111"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_text_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "把文本改成 Hello 字体 SF Pro", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_text_compound/);
+    assert.match(stdout, /notes:\n- 已生成文本内容命令：Hello。\n- 已生成字体命令：SF Pro。/);
+    assert.match(stdout, /"capabilityId": "text\.set-content"/);
+    assert.match(stdout, /"value": "Hello"/);
+    assert.match(stdout, /"capabilityId": "text\.set-font-family"/);
+    assert.match(stdout, /"family": "SF Pro"/);
+  });
+});
+
+test("plugin_bridge_cli send composes compound stroke prompts into multiple capability commands", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "strokes.set-weight" }, { id: "strokes.set-stroke" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Card Border",
+              type: "RECTANGLE",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_stroke_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "描边 #222222 粗细 3", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_stroke_compound/);
+    assert.match(stdout, /notes:\n- 已生成描边粗细命令：3px。\n- 已生成描边颜色命令：#222222。/);
+    assert.match(stdout, /"capabilityId": "strokes\.set-weight"/);
+    assert.match(stdout, /"value": 3/);
+    assert.match(stdout, /"capabilityId": "strokes\.set-stroke"/);
+    assert.match(stdout, /"hex": "#222222"/);
+  });
+});
+
+test("plugin_bridge_cli send preserves distinct fill and stroke colors in one prompt", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "fills.set-fill" }, { id: "strokes.set-weight" }, { id: "strokes.set-stroke" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Surface Card",
+              type: "RECTANGLE",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_fill_stroke_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "填充 #111111 描边 #222222 粗细 2", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_fill_stroke_compound/);
+    assert.match(
+      stdout,
+      /notes:\n- 已生成填充颜色命令：#111111。\n- 已生成描边粗细命令：2px。\n- 已生成描边颜色命令：#222222。/,
+    );
+    assert.match(stdout, /"capabilityId": "fills\.set-fill"/);
+    assert.match(stdout, /"hex": "#111111"/);
+    assert.match(stdout, /"capabilityId": "strokes\.set-weight"/);
+    assert.match(stdout, /"value": 2/);
+    assert.match(stdout, /"capabilityId": "strokes\.set-stroke"/);
+    assert.match(stdout, /"hex": "#222222"/);
+  });
+});
+
+test("plugin_bridge_cli send composes rename and fill prompts without swallowing the fill clause into the new name", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "nodes.rename" }, { id: "fills.set-fill" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Old Hero",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_rename_fill_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "重命名为 Hero 填充 #111111", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_rename_fill_compound/);
+    assert.match(stdout, /notes:\n- 已生成重命名命令：Hero。\n- 已生成填充颜色命令：#111111。/);
+    assert.match(stdout, /"capabilityId": "nodes\.rename"/);
+    assert.match(stdout, /"name": "Hero"/);
+    assert.match(stdout, /"capabilityId": "fills\.set-fill"/);
+    assert.match(stdout, /"hex": "#111111"/);
+    assert.doesNotMatch(stdout, /"name": "Hero 填充 #111111"/);
+  });
+});
+
+test("plugin_bridge_cli send composes text-color and opacity prompts into multiple capability commands", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "text.set-text-color" }, { id: "nodes.set-opacity" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Body Copy",
+              type: "TEXT",
+              fills: ["#333333"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_text_opacity_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "文字颜色 #111111 透明度 80", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_text_opacity_compound/);
+    assert.match(stdout, /notes:\n- 已生成文字颜色命令：#111111。\n- 已生成透明度命令：80%。/);
+    assert.match(stdout, /"capabilityId": "text\.set-text-color"/);
+    assert.match(stdout, /"hex": "#111111"/);
+    assert.match(stdout, /"capabilityId": "nodes\.set-opacity"/);
+    assert.match(stdout, /"value": 80/);
+  });
+});
+
+test("plugin_bridge_cli send composes style-apply and opacity prompts into multiple capability commands", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "styles.apply-style" }, { id: "nodes.set-opacity" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Styled Card",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_style_opacity_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "应用样式 Primary Card 透明度 80", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_style_opacity_compound/);
+    assert.match(stdout, /notes:\n- 已生成样式应用命令：Primary Card。\n- 已生成透明度命令：80%。/);
+    assert.match(stdout, /"capabilityId": "styles\.apply-style"/);
+    assert.match(stdout, /"styleName": "Primary Card"/);
+    assert.match(stdout, /"capabilityId": "nodes\.set-opacity"/);
+    assert.match(stdout, /"value": 80/);
+  });
+});
+
+test("plugin_bridge_cli send treats style definitions with color and apply as paint-style upserts", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "styles.upsert-paint-style" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Styled Card",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_style_upsert_apply",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "样式 Primary Card #111111 应用", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_style_upsert_apply/);
+    assert.match(stdout, /notes:\n- 已生成样式命令：Primary Card。/);
+    assert.match(stdout, /"capabilityId": "styles\.upsert-paint-style"/);
+    assert.match(stdout, /"name": "Primary Card"/);
+    assert.match(stdout, /"hex": "#111111"/);
+    assert.match(stdout, /"applyToSelection": true/);
+    assert.doesNotMatch(stdout, /"capabilityId": "styles\.apply-style"/);
+  });
+});
+
+test("plugin_bridge_cli send keeps apply-style prompts from drifting into paint-style upsert when a fill clause follows", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "styles.apply-style" }, { id: "fills.set-fill" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Styled Card",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_apply_style_fill_compound",
+    });
+
+    const { stdout } = await runCli(
+      ["send", "--prompt", "应用样式 Primary Card 填充 #111111", "--node-ids", "1:2"],
+      fixtureDir,
+    );
+
+    assert.match(stdout, /queued: cmd_apply_style_fill_compound/);
+    assert.match(stdout, /notes:\n- 已生成样式应用命令：Primary Card。\n- 已生成填充颜色命令：#111111。/);
+    assert.match(stdout, /"capabilityId": "styles\.apply-style"/);
+    assert.match(stdout, /"styleName": "Primary Card"/);
+    assert.match(stdout, /"capabilityId": "fills\.set-fill"/);
+    assert.match(stdout, /"hex": "#111111"/);
+    assert.doesNotMatch(stdout, /"capabilityId": "styles\.upsert-paint-style"/);
   });
 });
 
@@ -946,6 +1385,14 @@ test("plugin_bridge_cli reconstruct --export-guides writes a guide manifest with
     try {
       await writeFixture(
         fixtureDir,
+        "get__api__reconstruction__jobs__job-vector.json",
+        createReconstructionJobFixture("vector-reconstruction", {
+          id: "job-vector",
+          analysis: createVectorElementAnalysisFixture(),
+        }),
+      );
+      await writeFixture(
+        fixtureDir,
         "get__api__reconstruction__jobs__job-vector__guide-manifest.json",
         createGuideManifestFixture(),
       );
@@ -965,6 +1412,235 @@ test("plugin_bridge_cli reconstruct --export-guides writes a guide manifest with
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --export-guides rejects missing structured analysis", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-vector.json",
+      createReconstructionJobFixture("vector-reconstruction", {
+        id: "job-vector",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-vector", "--export-guides"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no structured analysis yet\./);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --estimate-quad --draft-analysis writes vector draft artifacts from offline fixtures", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-vector-draft-"));
+    try {
+      await writeFixture(
+        fixtureDir,
+        "get__api__reconstruction__jobs__job-vector.json",
+        createReconstructionJobFixture("vector-reconstruction", {
+          id: "job-vector",
+          referenceNode: {
+            id: "reference-1",
+            name: "Reference Frame",
+            type: "FRAME",
+            fillable: true,
+            fills: [],
+            fillStyleId: null,
+            width: 200,
+            height: 100,
+          },
+          referenceRaster: {
+            nodeId: "reference-1",
+            mimeType: "image/png",
+            width: 200,
+            height: 100,
+            dataUrl: VALID_PNG_DATA_URL,
+            source: "node-export",
+          },
+        }),
+      );
+      await writeFixture(fixtureDir, "estimate-screen-quad__job-vector.json", {
+        rotationDegrees: 11.5,
+        rotatedBox: {
+          x: 20,
+          y: 10,
+          width: 160,
+          height: 80,
+          density: 0.84,
+        },
+        sourceQuadPixels: [
+          { x: 20, y: 10 },
+          { x: 180, y: 10 },
+          { x: 180, y: 90 },
+          { x: 20, y: 90 },
+        ],
+        debug: {
+          originalOverlayPath: "/tmp/job-vector-original-overlay.png",
+          rotatedOverlayPath: "/tmp/job-vector-rotated-overlay.png",
+        },
+      });
+      await writeBinaryFixture(fixtureDir, "reconstruct-remap-preview__job-vector.png", pngBuffer());
+      await writeFixture(fixtureDir, "preview-heuristic__job-vector-remap-preview.json", {
+        width: 160,
+        height: 100,
+        dominantColors: ["#111111", "#6D6FD0"],
+        layoutRegions: [
+          {
+            id: "surface-top-card",
+            kind: "surface",
+            confidence: 0.96,
+            bounds: { x: 0.08, y: 0.08, width: 0.72, height: 0.46 },
+            fillHex: "#6D6FD0",
+          },
+        ],
+        textCandidates: [
+          {
+            id: "metric-1",
+            confidence: 0.98,
+            bounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+            estimatedRole: "metric",
+          },
+        ],
+        textStyleHints: [
+          {
+            textCandidateId: "metric-1",
+            role: "metric",
+            fontCategory: "display",
+            fontWeightGuess: 700,
+            fontSizeEstimate: 24,
+            colorHex: "#111111",
+            alignmentGuess: "left",
+            lineHeightEstimate: 26,
+            letterSpacingEstimate: 0,
+            confidence: 0.92,
+          },
+        ],
+        assetCandidates: [],
+        styleHints: {
+          theme: "dark",
+          cornerRadiusHint: 24,
+          shadowHint: "soft",
+          primaryColorHex: "#111111",
+          accentColorHex: "#6D6FD0",
+        },
+        uncertainties: [],
+      });
+      await writeFixture(fixtureDir, "vision-ocr__job-vector-remap-preview.json", [
+        {
+          text: "37.5%",
+          confidence: 0.99,
+          bounds: { x: 0.16, y: 0.18, width: 0.22, height: 0.12 },
+        },
+      ]);
+
+      const { stdout } = await runCli(
+        ["reconstruct", "--job", "job-vector", "--estimate-quad", "--draft-analysis", "--out", outputDir],
+        fixtureDir,
+      );
+
+      const remapPath = path.join(outputDir, "job-vector-remap-preview.png");
+      const draftPath = path.join(outputDir, "job-vector-vector-analysis-draft.json");
+      const draft = JSON.parse(await readFile(draftPath, "utf8"));
+
+      assert.match(stdout, /job: job-vector/);
+      assert.match(stdout, /estimatedRotation: 11\.5deg/);
+      assert.match(stdout, /sourceQuadPx: 20,10 \| 180,10 \| 180,90 \| 20,90/);
+      assert.match(stdout, new RegExp(`remapPreview: ${remapPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.match(stdout, new RegExp(`analysisDraft: ${draftPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.equal((await readFile(remapPath))[0], 0x89);
+      assert.equal(draft.analysisProvider, "codex-assisted");
+      assert.deepEqual(draft.analysis.canonicalFrame.sourceQuad[0], { x: 0.1, y: 0.1 });
+      assert.equal(draft.analysis.textBlocks[0].content, "37.5%");
+      assert.ok(draft.analysis.designSurfaces.length >= 1);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --draft-analysis writes a hybrid draft from an explicit source quad", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-hybrid-draft-"));
+    try {
+      await writeFixture(
+        fixtureDir,
+        "get__api__reconstruction__jobs__job-hybrid.json",
+        createReconstructionJobFixture("hybrid-reconstruction", {
+          id: "job-hybrid",
+          referenceRaster: {
+            nodeId: "reference-1",
+            mimeType: "image/png",
+            width: 160,
+            height: 100,
+            dataUrl: VALID_PNG_DATA_URL,
+            source: "node-export",
+          },
+        }),
+      );
+      await writeBinaryFixture(fixtureDir, "reconstruct-remap-preview__job-hybrid.png", pngBuffer());
+
+      const { stdout } = await runCli(
+        [
+          "reconstruct",
+          "--job",
+          "job-hybrid",
+          "--draft-analysis",
+          "--source-quad-px",
+          "16,10;144,10;144,90;16,90",
+          "--out",
+          outputDir,
+        ],
+        fixtureDir,
+      );
+
+      const remapPath = path.join(outputDir, "job-hybrid-remap-preview.png");
+      const draftPath = path.join(outputDir, "job-hybrid-hybrid-analysis-draft.json");
+      const draft = JSON.parse(await readFile(draftPath, "utf8"));
+
+      assert.match(stdout, /job: job-hybrid/);
+      assert.match(stdout, /sourceQuadPx: 16,10 \| 144,10 \| 144,90 \| 16,90/);
+      assert.match(stdout, new RegExp(`remapPreview: ${remapPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.match(stdout, new RegExp(`analysisDraft: ${draftPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.equal((await readFile(remapPath))[0], 0x89);
+      assert.equal(draft.analysisProvider, "codex-assisted");
+      assert.deepEqual(draft.analysis.canonicalFrame.sourceQuad[0], { x: 0.1, y: 0.1 });
+      assert.equal(draft.analysis.deprojectionNotes[0].id, "source-quad-draft");
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --preview-remap requires an explicit or estimated source quad", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+        referenceRaster: {
+          nodeId: "reference-1",
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          dataUrl: VALID_PNG_DATA_URL,
+          source: "node-export",
+        },
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--preview-remap"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /无法获得 sourceQuad。请提供 --source-quad-px，或使用 --estimate-quad。/);
+        return true;
+      },
+    );
   });
 });
 
@@ -1138,6 +1814,26 @@ test("plugin_bridge_cli reconstruct --score-elements prints per-element scores u
   });
 });
 
+test("plugin_bridge_cli reconstruct --score-elements rejects missing structured analysis", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-vector.json",
+      createReconstructionJobFixture("vector-reconstruction", {
+        id: "job-vector",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-vector", "--score-elements"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no structured analysis yet/);
+        return true;
+      },
+    );
+  });
+});
+
 test("plugin_bridge_cli reconstruct --render-element exports reference and rendered crops", async () => {
   await withFixtureDir(async (fixtureDir) => {
     const outputDir = await mkdtemp(path.join(os.tmpdir(), "autodesign-reconstruction-element-render-"));
@@ -1213,6 +1909,26 @@ test("plugin_bridge_cli reconstruct --render-element exports reference and rende
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
+  });
+});
+
+test("plugin_bridge_cli reconstruct --render-element rejects missing structured analysis", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-vector.json",
+      createReconstructionJobFixture("vector-reconstruction", {
+        id: "job-vector",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-vector", "--render-element", "37.5%"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no structured analysis yet\./);
+        return true;
+      },
+    );
   });
 });
 
@@ -1496,8 +2212,28 @@ test("plugin_bridge_cli reconstruct --apply prints deduplicated applied nodes an
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
       fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+        approvalState: "approved",
+        rebuildPlan: {
+          previewOnly: false,
+          summary: ["Apply vector rebuild"],
+          ops: [],
+        },
+      }),
+    );
+    await writeFixture(
+      fixtureDir,
       "post__api__reconstruction__jobs__job-hybrid__apply.json",
       createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+        approvalState: "approved",
+        rebuildPlan: {
+          previewOnly: false,
+          summary: ["Apply vector rebuild"],
+          ops: [],
+        },
         applyStatus: "applied",
         currentStageId: "apply-rebuild",
         appliedNodeIds: ["node-a", "node-b"],
@@ -1513,11 +2249,57 @@ test("plugin_bridge_cli reconstruct --apply prints deduplicated applied nodes an
     );
 
     const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--apply"], fixtureDir);
-    assert.match(stdout, /job: job-hybrid-reconstruction/);
+    assert.match(stdout, /job: job-hybrid/);
     assert.match(stdout, /applyStatus: applied/);
     assert.match(stdout, /current stage: apply-rebuild/);
     assert.match(stdout, /appliedNodeIds: 2/);
     assert.match(stdout, /stages:\n- apply-rebuild: completed \| Rebuild applied/);
+  });
+});
+
+test("plugin_bridge_cli reconstruct --apply rejects missing rebuild plan before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--apply"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no rebuild plan yet/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --apply rejects unapproved rebuilds before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+        approvalState: "pending-review",
+        rebuildPlan: {
+          previewOnly: false,
+          summary: ["Need approval before apply"],
+          ops: [],
+        },
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--apply"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job must be approved before apply\. current approvalState=pending-review/);
+        return true;
+      },
+    );
   });
 });
 
@@ -1561,8 +2343,23 @@ test("plugin_bridge_cli reconstruct --measure prints diff metrics and acceptance
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
       fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+        renderedPreview: {
+          previewDataUrl: pngDataUrl("rendered-preview"),
+          mimeType: "image/png",
+          width: 160,
+          height: 100,
+          capturedAt: "2026-03-23T12:20:00.000Z",
+        },
+      }),
+    );
+    await writeFixture(
+      fixtureDir,
       "post__api__reconstruction__jobs__job-hybrid__measure.json",
       createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
         currentStageId: "measure-diff",
         diffScore: 0.91,
         bestDiffScore: 0.91,
@@ -1616,43 +2413,63 @@ test("plugin_bridge_cli reconstruct --measure prints diff metrics and acceptance
   });
 });
 
-test("plugin_bridge_cli reconstruct --refine prints terminal status and actionable suggestions", async () => {
+test("plugin_bridge_cli reconstruct --measure rejects missing rendered preview before posting", async () => {
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
       fixtureDir,
-      "post__api__reconstruction__jobs__job-hybrid__refine.json",
+      "get__api__reconstruction__jobs__job-hybrid.json",
       createReconstructionJobFixture("hybrid-reconstruction", {
-        status: "completed",
-        loopStatus: "stopped",
-        stopReason: "target_reached",
-        currentStageId: "done",
-        refineSuggestions: [
-          {
-            id: "manual-review-1",
-            kind: "manual-review",
-            confidence: 0.92,
-            message: "当前结果已通过硬门槛。",
-            bounds: null,
-          },
-        ],
-        stages: [
-          {
-            stageId: "done",
-            status: "completed",
-            message: "Refine complete",
-            updatedAt: "2026-03-23T12:30:00.000Z",
-          },
-        ],
+        id: "job-hybrid",
       }),
     );
 
-    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--refine"], fixtureDir);
-    assert.match(stdout, /status: completed/);
-    assert.match(stdout, /loopStatus: stopped/);
-    assert.match(stdout, /stopReason: target_reached/);
-    assert.match(stdout, /current stage: done/);
-    assert.match(stdout, /refineSuggestions:\n- \[manual-review\] 当前结果已通过硬门槛。/);
-    assert.match(stdout, /stages:\n- done: completed \| Refine complete/);
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--measure"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no rendered preview yet\./);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --refine rejects missing diff metrics before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-preview.json",
+      createReconstructionJobFixture("structural-preview", {
+        id: "job-preview",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-preview", "--refine"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no diff metrics yet\./);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --refine rejects unsupported hybrid auto-refine before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-hybrid.json",
+      createReconstructionJobFixture("hybrid-reconstruction", {
+        id: "job-hybrid",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-hybrid", "--refine"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /hybrid-reconstruction 当前先支持 apply\/render\/measure，暂不支持自动 refine。/);
+        return true;
+      },
+    );
   });
 });
 
@@ -1683,76 +2500,85 @@ test("plugin_bridge_cli reconstruct --clear resets applied nodes and returns to 
   });
 });
 
-test("plugin_bridge_cli reconstruct --iterate prints updated iteration metrics and pending refine suggestions", async () => {
+test("plugin_bridge_cli reconstruct --iterate rejects unsupported vector iteration before posting", async () => {
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
       fixtureDir,
-      "post__api__reconstruction__jobs__job-hybrid__iterate.json",
-      createReconstructionJobFixture("hybrid-reconstruction", {
-        loopStatus: "running",
-        currentStageId: "measure-diff",
-        iterationCount: 2,
-        bestDiffScore: 0.89,
-        lastImprovement: 0.03,
-        stagnationCount: 0,
-        refineSuggestions: [
-          {
-            id: "layout-1",
-            kind: "layout",
-            confidence: 0.77,
-            message: "Tighten spacing in the top card cluster.",
-            bounds: {
-              x: 12,
-              y: 20,
-              width: 100,
-              height: 60,
-            },
-          },
-        ],
+      "get__api__reconstruction__jobs__job-vector.json",
+      createReconstructionJobFixture("vector-reconstruction", {
+        id: "job-vector",
       }),
     );
 
-    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--iterate"], fixtureDir);
-    assert.match(stdout, /loopStatus: running/);
-    assert.match(stdout, /iterationCount: 2/);
-    assert.match(stdout, /bestCompositeScore: 0\.8900/);
-    assert.match(stdout, /lastImprovement: 0\.0300/);
-    assert.match(stdout, /stagnationCount: 0/);
-    assert.match(stdout, /refineSuggestions:\n- \[layout\] Tighten spacing in the top card cluster\./);
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-vector", "--iterate"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /vector-reconstruction 目前不支持 iterate。请修改 analysis\/rebuild plan 后重新 apply。/);
+        return true;
+      },
+    );
   });
 });
 
-test("plugin_bridge_cli reconstruct --loop prints terminal loop state when the target is reached", async () => {
+test("plugin_bridge_cli reconstruct --iterate rejects missing analysis before posting", async () => {
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(
       fixtureDir,
-      "post__api__reconstruction__jobs__job-hybrid__loop.json",
-      createReconstructionJobFixture("hybrid-reconstruction", {
-        status: "completed",
-        loopStatus: "stopped",
-        stopReason: "target_reached",
-        currentStageId: "done",
-        iterationCount: 3,
-        bestDiffScore: 0.94,
-        lastImprovement: 0.01,
-        stages: [
-          {
-            stageId: "done",
-            status: "completed",
-            message: "Loop converged",
-            updatedAt: "2026-03-23T12:50:00.000Z",
-          },
-        ],
+      "get__api__reconstruction__jobs__job-preview.json",
+      createReconstructionJobFixture("structural-preview", {
+        id: "job-preview",
       }),
     );
 
-    const { stdout } = await runCli(["reconstruct", "--job", "job-hybrid", "--loop"], fixtureDir);
-    assert.match(stdout, /status: completed/);
-    assert.match(stdout, /loopStatus: stopped/);
-    assert.match(stdout, /stopReason: target_reached/);
-    assert.match(stdout, /iterationCount: 3/);
-    assert.match(stdout, /bestCompositeScore: 0\.9400/);
-    assert.match(stdout, /stages:\n- done: completed \| Loop converged/);
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-preview", "--iterate"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job has no analysis yet/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --loop rejects unsupported raster refine loop before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-raster.json",
+      createReconstructionJobFixture("raster-exact", {
+        id: "job-raster",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-raster", "--loop"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /raster-exact job 不支持自动 refine loop。/);
+        return true;
+      },
+    );
+  });
+});
+
+test("plugin_bridge_cli reconstruct --loop rejects unapplied jobs before posting", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(
+      fixtureDir,
+      "get__api__reconstruction__jobs__job-preview.json",
+      createReconstructionJobFixture("structural-preview", {
+        id: "job-preview",
+        analysis: createVectorElementAnalysisFixture(),
+        applyStatus: "not_applied",
+      }),
+    );
+
+    await assert.rejects(
+      () => runCli(["reconstruct", "--job", "job-preview", "--loop"], fixtureDir),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /Reconstruction job must be applied before running auto refine loop/);
+        return true;
+      },
+    );
   });
 });
 

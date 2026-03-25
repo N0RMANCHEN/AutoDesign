@@ -33,7 +33,7 @@ async function writeBaseSchemas(tempDir: string) {
         properties: {
           kind: { const: "acceptance_report", type: "string" },
           timestamp: { type: "string", pattern: "^[0-9]{8}-[0-9]{6}$" },
-          status: { type: "string", enum: ["PASS", "FAIL"] },
+          status: { type: "string", enum: ["PENDING", "PASS", "FAIL"] },
           scope: { type: "string", minLength: 1 },
           owner: { type: "string", minLength: 1 },
           scenario: { type: "string", minLength: 1 },
@@ -80,7 +80,7 @@ test("check_report_schemas passes for valid acceptance and quality reports", asy
         {
           kind: "acceptance_report",
           timestamp: "20260101-000000",
-          status: "PASS",
+          status: "PENDING",
           scope: "acceptance scope",
           owner: "Codex",
           scenario: "validate acceptance report",

@@ -46,8 +46,84 @@ type ReconstructCliDeps = {
   pickSession: (sessions: PluginBridgeSession[], explicitSessionId: string | null) => PluginBridgeSession;
 };
 
+type ReconstructionExecutionAction = "apply" | "measure" | "refine" | "iterate" | "loop";
+
 function fail(message: string): never {
   throw new Error(message);
+}
+
+function getBlockedExecutionActionMessage(
+  job: ReconstructionJob,
+  action: ReconstructionExecutionAction,
+): string | null {
+  if (action === "apply") {
+    if (job.input.strategy !== "raster-exact" && !job.rebuildPlan) {
+      return "Reconstruction job has no rebuild plan yet";
+    }
+    if (job.input.strategy !== "raster-exact" && job.approvalState !== "approved") {
+      return `Reconstruction job must be approved before apply. current approvalState=${job.approvalState}`;
+    }
+    return null;
+  }
+
+  if (action === "measure") {
+    if (!job.renderedPreview?.previewDataUrl) {
+      return "Reconstruction job has no rendered preview yet.";
+    }
+    return null;
+  }
+
+  if (action === "refine") {
+    if (job.input.strategy === "raster-exact") {
+      return "raster-exact job 不支持 refine。请直接使用 render + measure 进行验收。";
+    }
+    if (job.input.strategy === "vector-reconstruction") {
+      return "vector-reconstruction 目前不支持自动 refine。请重新提交 analysis 后再 apply/render/measure。";
+    }
+    if (job.input.strategy === "hybrid-reconstruction") {
+      return "hybrid-reconstruction 当前先支持 apply/render/measure，暂不支持自动 refine。";
+    }
+    if (!job.diffMetrics) {
+      return "Reconstruction job has no diff metrics yet.";
+    }
+    return null;
+  }
+
+  if (action === "iterate") {
+    if (job.input.strategy === "raster-exact") {
+      return "raster-exact job 不支持 iterate。请直接使用 render + measure。";
+    }
+    if (job.input.strategy === "vector-reconstruction") {
+      return "vector-reconstruction 目前不支持 iterate。请修改 analysis/rebuild plan 后重新 apply。";
+    }
+    if (job.input.strategy === "hybrid-reconstruction") {
+      return "hybrid-reconstruction 当前暂不支持 iterate。请重新提交 analysis 后再 apply/render/measure。";
+    }
+    if (!job.analysis) {
+      return "Reconstruction job has no analysis yet";
+    }
+    if (job.applyStatus !== "applied") {
+      return "Reconstruction job must be applied before running diff iteration";
+    }
+    return null;
+  }
+
+  if (job.input.strategy === "raster-exact") {
+    return "raster-exact job 不支持自动 refine loop。";
+  }
+  if (job.input.strategy === "vector-reconstruction") {
+    return "vector-reconstruction 目前不支持自动 refine loop。";
+  }
+  if (job.input.strategy === "hybrid-reconstruction") {
+    return "hybrid-reconstruction 当前暂不支持自动 refine loop。";
+  }
+  if (!job.analysis) {
+    return "Reconstruction job has no analysis yet";
+  }
+  if (job.applyStatus !== "applied") {
+    return "Reconstruction job must be applied before running auto refine loop";
+  }
+  return null;
 }
 
 export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
@@ -58,8 +134,11 @@ export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
       const outputDirectory = deps.readFlag(argv, "--out") || path.join(process.cwd(), "data", "reconstruction-remaps");
       await mkdir(outputDirectory, { recursive: true });
       const explicitSourceQuad = parseSourceQuadPixels(deps.readFlag(argv, "--source-quad-px"));
+      const shouldEstimateSourceQuad = argv.includes("--estimate-quad");
       const estimated =
-        explicitSourceQuad.length === 4 ? null : await estimateSourceQuadPixels(job, outputDirectory);
+        explicitSourceQuad.length === 4 || !shouldEstimateSourceQuad
+          ? null
+          : await estimateSourceQuadPixels(job, outputDirectory);
       const sourceQuadPixels = explicitSourceQuad.length === 4 ? explicitSourceQuad : estimated?.sourceQuadPixels || [];
 
       if (!sourceQuadPixels.length) {
@@ -90,16 +169,23 @@ export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
         console.log(`remapPreview: ${remapPreviewPath}`);
       }
       if (argv.includes("--draft-analysis")) {
+        if (!remapPreviewPath) {
+          fail("draft-analysis 需要 remap preview，但当前没有生成成功。");
+        }
         const draftPath =
-          job.input.strategy === "vector-reconstruction" && remapPreviewPath
+          job.input.strategy === "vector-reconstruction"
             ? await writeVectorAnalysisDraft(job, sourceQuadPixels, remapPreviewPath, outputDirectory)
-            : await writeHybridAnalysisDraft(job, sourceQuadPixels, outputDirectory);
+            : await writeHybridAnalysisDraft(job, sourceQuadPixels, remapPreviewPath, outputDirectory);
         console.log(`analysisDraft: ${draftPath}`);
       }
       return;
     }
 
     if (argv.includes("--export-guides")) {
+      const job = await deps.requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}`);
+      if (!job.analysis) {
+        fail("Reconstruction job has no structured analysis yet.");
+      }
       const manifest = await deps.requestJson<ReconstructionGuideManifest>(`/api/reconstruction/jobs/${jobId}/guide-manifest`);
       const outputDirectory = deps.readFlag(argv, "--out") || path.join(process.cwd(), "data", "reconstruction-guides");
       const artifacts = await writeGuideArtifacts(manifest, outputDirectory);
@@ -116,6 +202,9 @@ export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
     const scoreElementQuery = deps.readValueFlag(argv, "--score-element");
     if (argv.includes("--score-elements") || argv.includes("--score-element") || scoreElementQuery) {
       const job = await deps.requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}`);
+      if (!job.analysis) {
+        fail("Reconstruction job has no structured analysis yet");
+      }
       const manifest = await deps.requestJson<ReconstructionGuideManifest>(`/api/reconstruction/jobs/${jobId}/guide-manifest`);
       const inspectPayload = await inspectFramePayload(deps.requestJson, job.input.targetSessionId, job.targetNode.id, {
         maxDepth: (() => {
@@ -157,6 +246,9 @@ export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
         fail("--render-element 需要一个元素 id/name，或配合 --element 使用。");
       }
       const job = await deps.requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}`);
+      if (!job.analysis) {
+        fail("Reconstruction job has no structured analysis yet.");
+      }
       const manifest = await deps.requestJson<ReconstructionGuideManifest>(`/api/reconstruction/jobs/${jobId}/guide-manifest`);
       const element = resolveElementQuery(manifest.elements, explicitQuery);
       if (!element) {
@@ -290,6 +382,13 @@ export async function runReconstruct(argv: string[], deps: ReconstructCliDeps) {
 
     for (const action of ["apply", "clear", "render", "measure", "refine", "iterate", "loop"] as const) {
       if (argv.includes(`--${action}`)) {
+        if (action === "apply" || action === "measure" || action === "refine" || action === "iterate" || action === "loop") {
+          const currentJob = await deps.requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}`);
+          const blockedMessage = getBlockedExecutionActionMessage(currentJob, action);
+          if (blockedMessage) {
+            fail(blockedMessage);
+          }
+        }
         const job = await deps.requestJson<ReconstructionJob>(`/api/reconstruction/jobs/${jobId}/${action}`, {
           method: "POST",
         });

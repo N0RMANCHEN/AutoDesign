@@ -98,6 +98,12 @@ async function main() {
     } else if (!existsSync(path.join(root, "doc", planPath))) {
       failures.push(`roadmap plan target missing for ${section.heading}: doc/${planPath}`);
     }
+    if (!section.body.includes("- 当前收口子任务：")) {
+      failures.push(`roadmap task missing 当前收口子任务: ${section.heading}`);
+    }
+    if (!section.body.includes("- 完成判据：")) {
+      failures.push(`roadmap task missing 完成判据: ${section.heading}`);
+    }
     if (status === "acceptance_pending" && !section.body.includes("acceptance_owner")) {
       failures.push(`acceptance_pending task missing acceptance_owner: ${section.heading}`);
     }

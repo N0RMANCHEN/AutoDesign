@@ -29,6 +29,14 @@
 - `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
 - `npm run acceptance:preflight`
 - `npm run acceptance:prep -- --owner <name>`
+- `npm run quality:prep -- --job <JOB_ID> --owner <name>`
+- `npm run quality:new -- --scenario reconstruction-measure --owner <name>`
+- [reports/quality/RUNBOOK.md](quality/RUNBOOK.md)
+
+注意：
+
+- 新生成的 acceptance report 默认状态是 `PENDING`
+- 只有真实验收跑完后，才应把状态更新为 `PASS` 或 `FAIL`
 
 报告合同：
 

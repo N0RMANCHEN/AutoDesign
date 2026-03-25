@@ -16,6 +16,11 @@
 - 生成 `reports/acceptance/acceptance-<timestamp>.md + .json`
 - 生成 `reports/acceptance/artifacts/<timestamp>/plugin-bridge-snapshot.json`
 
+注意：
+
+- 新生成的 acceptance report 默认状态是 `PENDING`
+- preflight 通过不等于 live 验收通过，完成实机验证后再把状态改成 `PASS` 或 `FAIL`
+
 ## 2. 先看预检是否通过
 
 检查 `reports/acceptance/artifacts/<timestamp>/preflight-summary.txt`：
@@ -76,6 +81,7 @@
 ## 6. 验收后要补什么
 
 - 把结果回填到对应 `acceptance-<timestamp>.md`
-- 把关键 artifact 路径写进 `acceptance-<timestamp>.json`
+- 把 `acceptance-<timestamp>.md + .json` 的状态从 `PENDING` 更新成 `PASS` 或 `FAIL`
+- 把关键 artifact 路径补齐到 `acceptance-<timestamp>.json`
 - 若是 reconstruction 质量问题，再补 `reports/quality/`
 - 若暴露回归或事故，再补 `reports/incidents/`

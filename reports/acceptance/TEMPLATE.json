@@ -1,7 +1,7 @@
 {
   "kind": "acceptance_report",
   "timestamp": "20260101-000000",
-  "status": "PASS",
+  "status": "PENDING",
   "scope": "Describe the acceptance scope.",
   "owner": "Owner name",
   "scenario": "Describe the scenario under validation.",
@@ -15,9 +15,7 @@
   "observations": [
     "Key observation"
   ],
-  "artifacts": [
-    "reports/acceptance/acceptance-20260101-000000.md"
-  ],
+  "artifacts": [],
   "follow_up": [
     "Optional next action"
   ]

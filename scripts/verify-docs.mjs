@@ -40,6 +40,35 @@ const forbiddenStatusPatterns = [
   /状态：`?(?:in_progress|todo|done|active|completed)`?/u,
 ];
 
+const requiredActivePlanSections = [
+  "## Summary",
+  "## Scope",
+  "## Dependencies",
+  "## Entry Conditions",
+  "## Workstreams",
+  "## Closure Tasks",
+  "## Exit Conditions",
+  "## Risks",
+  "## Rollback",
+  "## Verification",
+];
+
+function extractMarkdownSection(content, heading) {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = content.match(new RegExp(`^${escaped}\\n([\\s\\S]*?)(?=^##\\s|\\Z)`, "m"));
+  return match ? match[1] : null;
+}
+
+function countListItems(sectionBody) {
+  if (!sectionBody) {
+    return 0;
+  }
+  return sectionBody
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- ")).length;
+}
+
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -147,6 +176,24 @@ async function main() {
 
     if (inPlans || inReports) {
       checkForbiddenStatus(filePath, content);
+    }
+
+    if (inPlans) {
+      for (const heading of requiredActivePlanSections) {
+        if (!content.includes(heading)) {
+          addError(filePath, `missing required section: ${heading}`);
+        }
+      }
+
+      const workstreamsSection = extractMarkdownSection(content, "## Workstreams");
+      if (workstreamsSection !== null && countListItems(workstreamsSection) < 2) {
+        addError(filePath, "Workstreams must contain at least 2 list items");
+      }
+
+      const closureTasksSection = extractMarkdownSection(content, "## Closure Tasks");
+      if (closureTasksSection !== null && countListItems(closureTasksSection) < 3) {
+        addError(filePath, "Closure Tasks must contain at least 3 list items");
+      }
     }
   }
 

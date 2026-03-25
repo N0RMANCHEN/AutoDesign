@@ -48,6 +48,19 @@
 - MCP 相关能力先做产品取舍，再进入 implementation
 - Roadmap 与 plan 对“本地等价能力”和“官方 remote MCP 平台能力”保持分离
 
+## Workstreams
+
+- 收紧 read/context parity，先固定本地设计事实读取 contract
+- 收紧 design system parity，让 mapping / review / evidence 可追踪
+- 收紧 safe write parity，只保留与当前产品主线重叠的高价值子集
+
+## Closure Tasks
+
+- 把 `get_design_context`、`get_variable_defs`、`get_metadata`、`get_screenshot` 的本地等价面补齐到稳定 contract + 测试 + 入口脚本
+- 把 Code Connect-like mapping 语义继续从宽泛 notes 收敛成显式 link / evidence / review contract
+- 把 safe write parity 子集明确到 capability catalog、runtime handler 与回归测试，不让 write 面继续泛化
+- 用文档和治理脚本持续阻止 remote hosted MCP、FigJam、Make、code-to-canvas 回流进当前 active scope
+
 ## Exit Conditions
 
 - read/context 等价面有明确 contract、测试和工作流入口

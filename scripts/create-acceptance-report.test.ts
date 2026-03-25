@@ -39,10 +39,11 @@ test("create_acceptance_report scaffolds markdown and json files for the live fi
     assert.match(stdout, /acceptance report created: reports\/acceptance\/acceptance-20260323-230000\.md/);
     assert.equal(payload.kind, "acceptance_report");
     assert.equal(payload.timestamp, timestamp);
-    assert.equal(payload.status, "PASS");
+    assert.equal(payload.status, "PENDING");
     assert.equal(payload.scope, "Live Figma / bridge acceptance");
     assert.equal(payload.commands.length, 3);
     assert.match(markdown, /## Steps/);
+    assert.match(markdown, /Status: `PENDING`/);
     assert.match(markdown, /Open Figma Desktop and launch the AutoDesign plugin/);
   });
 });

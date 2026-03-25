@@ -9,6 +9,9 @@ import type {
 } from "../shared/reconstruction.js";
 
 const execFileAsync = promisify(execFile);
+const reconstructFixtureDirectory = process.env.AUTODESIGN_RECONSTRUCT_FIXTURE_DIR
+  ? path.resolve(process.env.AUTODESIGN_RECONSTRUCT_FIXTURE_DIR)
+  : null;
 
 export type EstimatedScreenQuad = {
   rotationDegrees: number;
@@ -79,6 +82,33 @@ export type VisionOcrLine = {
 
 function fail(message: string): never {
   throw new Error(message);
+}
+
+function buildFixtureFileName(prefix: string, key: string, extension: string) {
+  return `${prefix}__${sanitizeFileSegment(key)}.${extension}`;
+}
+
+async function readFixtureBuffer(fileName: string) {
+  if (!reconstructFixtureDirectory) {
+    return null;
+  }
+
+  try {
+    return await readFile(path.join(reconstructFixtureDirectory, fileName));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readFixtureJson<T>(fileName: string) {
+  const buffer = await readFixtureBuffer(fileName);
+  if (!buffer) {
+    return null;
+  }
+  return JSON.parse(buffer.toString("utf8")) as T;
 }
 
 export function sanitizeFileSegment(value: string) {
@@ -157,6 +187,13 @@ export async function writeRemapPreview(
   const inputPath = path.join(outputDirectory, `${baseName}-remap-source.${reference.extension}`);
   const outputPath = path.join(outputDirectory, `${baseName}-remap-preview.png`);
   await writeFile(inputPath, reference.buffer);
+  const fixtureBuffer = await readFixtureBuffer(
+    buildFixtureFileName("reconstruct-remap-preview", baseName, "png"),
+  );
+  if (fixtureBuffer) {
+    await writeFile(outputPath, fixtureBuffer);
+    return outputPath;
+  }
 
   const targetWidth = Math.max(1, Math.round(job.targetNode.width || job.analysis?.canonicalFrame?.width || 0));
   const targetHeight = Math.max(1, Math.round(job.targetNode.height || job.analysis?.canonicalFrame?.height || 0));
@@ -188,6 +225,12 @@ export async function estimateSourceQuadPixels(job: ReconstructionJob, outputDir
   const inputPath = path.join(outputDirectory, `${baseName}-estimate-source.${reference.extension}`);
   const debugPrefix = path.join(outputDirectory, `${baseName}-estimate`);
   await writeFile(inputPath, reference.buffer);
+  const fixture = await readFixtureJson<EstimatedScreenQuad>(
+    buildFixtureFileName("estimate-screen-quad", baseName, "json"),
+  );
+  if (fixture) {
+    return fixture;
+  }
 
   const targetWidth = Math.max(1, Math.round(job.targetNode.width || job.analysis?.canonicalFrame?.width || 0));
   const targetHeight = Math.max(1, Math.round(job.targetNode.height || job.analysis?.canonicalFrame?.height || 0));
@@ -207,12 +250,26 @@ export async function estimateSourceQuadPixels(job: ReconstructionJob, outputDir
 }
 
 export async function runPreviewHeuristicAnalysis(imagePath: string): Promise<PreviewHeuristicAnalysis> {
+  const fixture = await readFixtureJson<PreviewHeuristicAnalysis>(
+    buildFixtureFileName("preview-heuristic", path.basename(imagePath, path.extname(imagePath)), "json"),
+  );
+  if (fixture) {
+    return fixture;
+  }
+
   const scriptPath = path.join(process.cwd(), "scripts", "analyze_reference_preview.py");
   const { stdout } = await execFileAsync("python3", [scriptPath, imagePath]);
   return JSON.parse(stdout) as PreviewHeuristicAnalysis;
 }
 
 export async function runVisionOcr(imagePath: string): Promise<VisionOcrLine[]> {
+  const fixture = await readFixtureJson<VisionOcrLine[]>(
+    buildFixtureFileName("vision-ocr", path.basename(imagePath, path.extname(imagePath)), "json"),
+  );
+  if (fixture) {
+    return fixture;
+  }
+
   const scriptPath = path.join(process.cwd(), "scripts", "ocr_preview_vision.swift");
   const { stdout } = await execFileAsync("/usr/bin/xcrun", ["swift", scriptPath, imagePath], {
     cwd: process.cwd(),

@@ -17,6 +17,10 @@ const namedColors: Array<[string, string]> = [
   ["灰色", "#9AA0A6"],
 ];
 
+function stripHexLiteralsForNumberParsing(text: string) {
+  return text.replace(/#[\da-fA-F]{3,8}\b/g, " ");
+}
+
 function normalizeHex(value: string) {
   const trimmed = value.trim().replace(/^#/, "");
   if (!/^[\da-fA-F]{3}$|^[\da-fA-F]{6}$/.test(trimmed)) {
@@ -49,8 +53,28 @@ export function resolveColor(text: string) {
   return null;
 }
 
+export function parseColorAfterKeyword(text: string, keywordPattern: string) {
+  const hexMatch = text.match(
+    new RegExp(`(?:${keywordPattern})(?:\\s*(?:颜色|color))?\\s*(#[\\da-fA-F]{3,6}\\b)`, "i"),
+  );
+  if (hexMatch) {
+    return normalizeHex(hexMatch[1]);
+  }
+
+  for (const [name, hex] of namedColors) {
+    const namedMatch = text.match(
+      new RegExp(`(?:${keywordPattern})(?:\\s*(?:颜色|color))?\\s*(${name})(?=\\s|$)`, "i"),
+    );
+    if (namedMatch) {
+      return hex;
+    }
+  }
+
+  return null;
+}
+
 export function resolveNumber(text: string) {
-  const matched = text.match(/-?\d+(\.\d+)?/);
+  const matched = stripHexLiteralsForNumberParsing(text).match(/-?\d+(\.\d+)?/);
   if (!matched) {
     return null;
   }
@@ -59,7 +83,26 @@ export function resolveNumber(text: string) {
 }
 
 export function resolveNumbers(text: string) {
-  return Array.from(text.matchAll(/-?\d+(\.\d+)?/g)).map((match) => Number.parseFloat(match[0]));
+  return Array.from(stripHexLiteralsForNumberParsing(text).matchAll(/-?\d+(\.\d+)?/g)).map((match) =>
+    Number.parseFloat(match[0]),
+  );
+}
+
+export function parseNumberAfterKeyword(text: string, keywordPattern: string) {
+  const match = stripHexLiteralsForNumberParsing(text).match(
+    new RegExp(`(?:${keywordPattern})\\s*(-?\\d+(?:\\.\\d+)?)`, "i"),
+  );
+  return match ? Number.parseFloat(match[1]) : null;
+}
+
+export function parseNumberPairAfterKeyword(text: string, keywordPattern: string) {
+  const match = stripHexLiteralsForNumberParsing(text).match(
+    new RegExp(`(?:${keywordPattern})\\s*(-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)`, "i"),
+  );
+  if (!match) {
+    return null;
+  }
+  return [Number.parseFloat(match[1]), Number.parseFloat(match[2])] as const;
 }
 
 export function parseVariableToken(text: string) {
@@ -94,13 +137,22 @@ function parseQuotedValue(text: string) {
   return match ? match[1].trim() : null;
 }
 
+function parseQuotedValueAfterKeyword(text: string, keywordPattern: string) {
+  const match = text.match(
+    new RegExp(`(?:${keywordPattern})\\s*[""'“”「」『』](.+?)[""'“”「」『』]`, "i"),
+  );
+  return match ? match[1].trim() : null;
+}
+
 export function parseFontFamily(text: string) {
-  const quoted = parseQuotedValue(text);
+  const quoted = parseQuotedValueAfterKeyword(text, "字体|font family");
   if (quoted) {
     return quoted;
   }
 
-  const match = text.match(/(?:字体|font family)\s+([^\s，。；;]+)/i);
+  const match = text.match(
+    /(?:字体|font family)\s+(.+?)(?=\s+(?:-?\d+(?:\.\d+)?(?:px)?|字号|font size|行高|line height|字重|font weight|字距|字间距|letter spacing|文字颜色|文本颜色|字体颜色|text color|颜色|color|左对齐|右对齐|居中对齐|文本居中|文字居中|两端对齐|align left|align center|align right|justify|#[\da-fA-F]{3,6}\b)|$)/i,
+  );
   return match ? match[1].trim() : null;
 }
 
@@ -110,8 +162,19 @@ export function parseTextValue(text: string) {
     return quoted;
   }
 
-  const match = text.match(/(?:文本|文字|content)\s*(?:改成|改为|设为|设置为|设置成)?\s*(.+)$/i);
-  return match ? match[1].trim() : null;
+  const match = text.match(
+    /(?:文本|文字|content)\s*(?:改成|改为|设为|设置为|设置成)?\s*(.+?)(?=\s+(?:字体|font family|字号|font size|行高|line height|字重|font weight|字距|字间距|letter spacing|文字颜色|文本颜色|字体颜色|text color|左对齐|右对齐|居中对齐|文本居中|文字居中|两端对齐|align left|align center|align right|justify)|$)/i,
+  );
+  if (!match) {
+    return null;
+  }
+
+  const value = match[1].trim();
+  if (!value || /^(?:颜色|样式|字号|行高|字重|字距|字间距|字体|对齐)\b/i.test(value)) {
+    return null;
+  }
+
+  return value;
 }
 
 export function parseFontWeight(text: string) {
@@ -125,7 +188,7 @@ export function parseFontWeight(text: string) {
     return "Light";
   }
 
-  const value = resolveNumber(text);
+  const value = parseNumberAfterKeyword(text, "字重|font weight");
   if (value !== null) {
     return value;
   }
@@ -172,7 +235,12 @@ export function parseNamedStyleTarget(text: string, keyword: string) {
   }
 
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`${escaped}\\s+([^\\s，。；;]+)`, "i"));
+  const match = text.match(
+    new RegExp(
+      `${escaped}\\s+(.+?)(?=\\s+(?:字体|font family|字号|font size|行高|line height|字重|font weight|颜色|color|对齐|align|透明度|opacity|圆角|radius|描边|stroke|边框|粗细|宽度|weight|thickness|填充|fill|阴影|shadow|模糊|blur|尺寸|大小|宽高|size|位置|坐标|position|move to|#[\\da-fA-F]{3,6}\\b)|$)`,
+      "i",
+    ),
+  );
   return match ? match[1].trim() : null;
 }
 
@@ -182,12 +250,14 @@ export function parseExplicitName(text: string) {
     return quoted;
   }
 
-  const direct = text.match(/(?:重命名为|命名为|名字叫|名称为|叫做|分组为|编组为)\s*(.+)$/i);
+  const direct = text.match(
+    /(?:重命名为|命名为|名字叫|名称为|叫做|分组为|编组为|名字改成|名字改为|名称改成|名称改为|名字设为|名称设为)\s*(.+?)(?=\s+(?:padding|内边距|gap|字体|font family|字号|font size|行高|line height|字重|font weight|字距|字间距|letter spacing|文字颜色|文本颜色|字体颜色|text color|透明度|opacity|圆角|radius|描边|stroke|边框|粗细|宽度|weight|thickness|填充|fill|阴影|shadow|模糊|blur|尺寸|大小|宽高|size|位置|坐标|position|move to|#[\da-fA-F]{3,6}\b)|$)/i,
+  );
   if (direct) {
     return direct[1].trim();
   }
 
-  const shortName = text.match(/名字\s+(.+?)(?=\s+(?:padding|内边距)\b|$)/i);
+  const shortName = text.match(/名字\s+(.+?)(?=\s+的|\s+(?:padding|内边距)\b|$)/i);
   return shortName ? shortName[1].trim() : null;
 }
 

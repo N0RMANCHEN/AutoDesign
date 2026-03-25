@@ -16,6 +16,35 @@
 - 建立 `reports/` 结构和规则
 - 收口文档绝对路径和职责边界
 
+## Dependencies
+
+- `README.md`
+- `doc/Roadmap.md`
+- `doc/plans/README.md`
+- `reports/README.md`
+- `CHANGELOG.md`
+- `scripts/verify-docs.mjs`
+- `scripts/check_doc_code_consistency.mjs`
+- `scripts/check_roadmap_reports_consistency.mjs`
+
+## Entry Conditions
+
+- 文档树已经完成分层重建
+- 文档相关校验脚本已经接入 `verify`
+- active work、archive、reports、changelog 的职责边界已经固定
+
+## Workstreams
+
+- 固定文档入口和分层职责，避免 README / Roadmap / plans / reports 混写
+- 固定文档门禁，让关键结构和链接漂移能被自动发现
+- 固定 task 关闭时的 archive / report / changelog 留痕路径
+
+## Closure Tasks
+
+- 给 active `Roadmap` 和 `doc/plans/*` 补齐可执行的子任务与完成判据结构
+- 把文档门禁扩展到 plan 结构完整性和 roadmap 收口字段，而不是只查链接和禁用状态词
+- 把模板、README 和实际 active plans 统一到同一套治理结构
+
 ## Exit Conditions
 
 - 文档层级明确，且每份文档只承担一种职责
@@ -34,3 +63,9 @@
 - 回退到本次改动前的文档版本
 - 恢复旧 `Roadmap` / `README` / `CHANGELOG`
 - 删除新建的 `Product-Standards`、`Test-Standards`、`reports/`
+
+## Verification
+
+- `npm run verify:docs`
+- `npm run check:doc-consistency`
+- `npm run check:roadmap-reports`

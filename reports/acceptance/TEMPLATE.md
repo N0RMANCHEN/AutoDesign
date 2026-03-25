@@ -1,7 +1,7 @@
 # Acceptance Report Title
 
 - Timestamp: `YYYYMMDD-HHMMSS`
-- Status: `PASS` / `FAIL`
+- Status: `PENDING` / `PASS` / `FAIL`
 - Scope:
 - Owner:
 
@@ -21,7 +21,7 @@
 
 ## Result
 
-- `PASS` / `FAIL`
+- `PENDING` / `PASS` / `FAIL`
 - 关键观察
 
 ## Artifacts

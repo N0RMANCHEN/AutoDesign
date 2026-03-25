@@ -57,7 +57,57 @@ test("verify_docs passes for valid markdown links, plans/reports content and run
   await withTempRepo(async (tempDir) => {
     await writeKeyDocs(tempDir);
     await writeRuntimeActionFixture(tempDir);
-    await writeFile(path.join(tempDir, "doc", "plans", "active-plan.md"), "Plan links to [archive](archive/README.md).\n", "utf8");
+    await writeFile(
+      path.join(tempDir, "doc", "plans", "active-plan.md"),
+      [
+        "# Active Plan",
+        "",
+        "## Summary",
+        "",
+        "Plan links to [archive](archive/README.md).",
+        "",
+        "## Scope",
+        "",
+        "- scope item",
+        "",
+        "## Dependencies",
+        "",
+        "- dependency item",
+        "",
+        "## Entry Conditions",
+        "",
+        "- entry item",
+        "",
+        "## Workstreams",
+        "",
+        "- workstream a",
+        "- workstream b",
+        "",
+        "## Closure Tasks",
+        "",
+        "- closure a",
+        "- closure b",
+        "- closure c",
+        "",
+        "## Exit Conditions",
+        "",
+        "- exit item",
+        "",
+        "## Risks",
+        "",
+        "- risk item",
+        "",
+        "## Rollback",
+        "",
+        "- rollback item",
+        "",
+        "## Verification",
+        "",
+        "- verify item",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     await writeFile(path.join(tempDir, "reports", "acceptance", "case.md"), "Acceptance references [reports root](../README.md).\n", "utf8");
 
     const { stdout } = await execFileAsync(process.execPath, [scriptPath], { cwd: tempDir });
@@ -101,6 +151,69 @@ test("verify_docs fails when plans use roadmap-style status fields or runtime ac
         assert.match(stderr, /verify:docs failed/);
         assert.match(stderr, /doc\/plans\/active-plan\.md: contains roadmap-style status field matching/);
         assert.match(stderr, /doc\/ai\/runtime\/actions\/knowledge\/learning_path\.md: missing 当前接入状态 declaration/);
+        return true;
+      },
+    );
+  });
+});
+
+test("verify_docs fails when active plans omit required subtask structure", async () => {
+  await withTempRepo(async (tempDir) => {
+    await writeKeyDocs(tempDir);
+    await writeRuntimeActionFixture(tempDir);
+    await writeFile(
+      path.join(tempDir, "doc", "plans", "active-plan.md"),
+      [
+        "# Active Plan",
+        "",
+        "## Summary",
+        "",
+        "Summary only.",
+        "",
+        "## Scope",
+        "",
+        "- scope item",
+        "",
+        "## Dependencies",
+        "",
+        "- dependency item",
+        "",
+        "## Entry Conditions",
+        "",
+        "- entry item",
+        "",
+        "## Workstreams",
+        "",
+        "- workstream only",
+        "",
+        "## Closure Tasks",
+        "",
+        "- closure a",
+        "",
+        "## Exit Conditions",
+        "",
+        "- exit item",
+        "",
+        "## Risks",
+        "",
+        "- risk item",
+        "",
+        "## Rollback",
+        "",
+        "- rollback item",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [scriptPath], { cwd: tempDir }),
+      (error: any) => {
+        const stderr = String(error.stderr || "");
+        assert.match(stderr, /verify:docs failed/);
+        assert.match(stderr, /doc\/plans\/active-plan\.md: missing required section: ## Verification/);
+        assert.match(stderr, /doc\/plans\/active-plan\.md: Workstreams must contain at least 2 list items/);
+        assert.match(stderr, /doc\/plans\/active-plan\.md: Closure Tasks must contain at least 3 list items/);
         return true;
       },
     );

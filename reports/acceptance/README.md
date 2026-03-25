@@ -16,6 +16,11 @@
 - `npm run acceptance:new -- --scenario reconstruction-live --owner <name>`
 - [reports/acceptance/RUNBOOK.md](RUNBOOK.md)
 
+新建脚手架默认状态：
+
+- `acceptance:new` 和 `acceptance:prep` 默认写成 `PENDING`
+- 只有 live run 实际完成后，才应人工回填成 `PASS` 或 `FAIL`
+
 命名约定：
 
 - `acceptance-YYYYMMDD-HHMMSS.md` + `acceptance-YYYYMMDD-HHMMSS.json`
@@ -50,7 +55,7 @@ live 验收前建议先执行：
 - `preflight-summary.txt`
 - 当前 selection 可导出的 preview PNG
 
-`acceptance:prep` 会额外同步创建同 timestamp 的 `.md + .json` 验收记录骨架，适合正式 live 验收前直接使用。
+`acceptance:prep` 会额外同步创建同 timestamp 的 `.md + .json` 验收记录骨架，默认状态为 `PENDING`，并把 preflight 真实 artifact 路径写回报告。
 
 不适用内容：
 

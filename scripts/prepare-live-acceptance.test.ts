@@ -83,14 +83,60 @@ test("prepare_live_acceptance scaffolds report and preflight artifacts with the 
     const reportJson = JSON.parse(
       await readFile(path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.json`), "utf8"),
     );
+    const reportMarkdown = await readFile(
+      path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.md`),
+      "utf8",
+    );
     const preflightSummary = await readFile(
       path.join(tempRoot, "reports", "acceptance", "artifacts", timestamp, "preflight-summary.txt"),
       "utf8",
     );
 
     assert.equal(reportJson.owner, "hirohi");
+    assert.equal(reportJson.status, "PENDING");
+    assert.deepEqual(reportJson.artifacts, [
+      `reports/acceptance/artifacts/${timestamp}/preflight-summary.txt`,
+      `reports/acceptance/artifacts/${timestamp}/plugin-bridge-snapshot.json`,
+      `reports/acceptance/artifacts/${timestamp}/0-target-frame.png`,
+    ]);
+    assert.match(reportMarkdown, /Status: `PENDING`/);
+    assert.match(reportMarkdown, /reports\/acceptance\/artifacts\/20260323-233000\/preflight-summary\.txt/);
     assert.match(preflightSummary, /session: session_preflight/);
     assert.match(stdout, /\[acceptance:prep] ready/);
+    assert.match(stdout, /\[acceptance:prep] status: PENDING/);
     assert.match(stdout, /reports\/acceptance\/acceptance-20260323-233000\.md/);
+  });
+});
+
+test("prepare_live_acceptance leaves a pending report behind when preflight fails", async () => {
+  await withTempRoot(async (tempRoot, fixtureDir) => {
+    await writeFile(
+      path.join(fixtureDir, "get__api__plugin-bridge.json"),
+      JSON.stringify({ sessions: [], commands: [] }, null, 2),
+      "utf8",
+    );
+
+    const timestamp = "20260323-233500";
+    await assert.rejects(
+      () =>
+        execFileAsync(process.execPath, [scriptPath, "--timestamp", timestamp, "--owner", "hirohi"], {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            AUTODESIGN_REPORT_ROOT: tempRoot,
+            AUTODESIGN_API_FIXTURE_DIR: fixtureDir,
+          },
+        }),
+      (error: Error & { stderr?: string }) => {
+        assert.match(String(error.stderr || ""), /当前没有在线插件会话/);
+        return true;
+      },
+    );
+
+    const reportJson = JSON.parse(
+      await readFile(path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.json`), "utf8"),
+    );
+    assert.equal(reportJson.status, "PENDING");
+    assert.deepEqual(reportJson.artifacts, []);
   });
 });

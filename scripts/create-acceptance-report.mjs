@@ -1,10 +1,12 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const rootDirectory = process.env.AUTODESIGN_REPORT_ROOT
   ? path.resolve(process.env.AUTODESIGN_REPORT_ROOT)
   : process.cwd();
 const acceptanceDirectory = path.join(rootDirectory, "reports", "acceptance");
+export const ACCEPTANCE_STATUSES = ["PENDING", "PASS", "FAIL"];
 
 const scenarioPresets = {
   "live-figma-bridge": {
@@ -104,7 +106,11 @@ async function ensureDoesNotExist(filePath) {
   }
 }
 
-function buildMarkdown({
+function formatBulletList(items, fallbackLine) {
+  return items.length ? items.map((item) => `- ${item}`).join("\n") : `- ${fallbackLine}`;
+}
+
+export function buildAcceptanceMarkdown({
   timestamp,
   status,
   scope,
@@ -138,16 +144,45 @@ ${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}
 ## Result
 
 - \`${status}\`
-- ${observations.join("\n- ")}
+${formatBulletList(observations, "Pending manual validation.")}
 
 ## Artifacts
 
-${artifacts.map((artifact) => `- ${artifact}`).join("\n")}
+${formatBulletList(artifacts, "Pending capture.")}
 
 ## Follow-up
 
-${followUp.map((item) => `- ${item}`).join("\n")}
+${formatBulletList(followUp, "Update status to PASS or FAIL after the live run.")}
 `;
+}
+
+export function resolveAcceptanceReportPaths(baseDirectory, timestamp) {
+  const baseName = `acceptance-${timestamp}`;
+  return {
+    baseName,
+    markdownPath: path.join(baseDirectory, `${baseName}.md`),
+    jsonPath: path.join(baseDirectory, `${baseName}.json`),
+  };
+}
+
+export async function writeAcceptanceReportFiles(baseDirectory, payload) {
+  const { markdownPath, jsonPath } = resolveAcceptanceReportPaths(baseDirectory, payload.timestamp);
+  const markdown = buildAcceptanceMarkdown({
+    timestamp: payload.timestamp,
+    status: payload.status,
+    scope: payload.scope,
+    owner: payload.owner,
+    scenario: payload.scenario,
+    commands: payload.commands,
+    steps: payload.steps,
+    observations: payload.observations,
+    artifacts: payload.artifacts,
+    followUp: payload.follow_up,
+  });
+
+  await writeFile(markdownPath, markdown, "utf8");
+  await writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return { markdownPath, jsonPath };
 }
 
 async function main() {
@@ -164,27 +199,20 @@ async function main() {
     throw new Error(`Invalid --timestamp: ${timestamp}`);
   }
 
-  const status = readFlag(process.argv, "--status") || "PASS";
-  if (status !== "PASS" && status !== "FAIL") {
+  const status = readFlag(process.argv, "--status") || "PENDING";
+  if (!ACCEPTANCE_STATUSES.includes(status)) {
     throw new Error(`Invalid --status: ${status}`);
   }
 
   const owner = readFlag(process.argv, "--owner") || "TBD";
   const scope = readFlag(process.argv, "--scope") || preset.scope;
   const scenario = readFlag(process.argv, "--scenario-text") || preset.scenario;
-  const baseName = `acceptance-${timestamp}`;
-  const markdownPath = path.join(acceptanceDirectory, `${baseName}.md`);
-  const jsonPath = path.join(acceptanceDirectory, `${baseName}.json`);
+  const { markdownPath, jsonPath } = resolveAcceptanceReportPaths(acceptanceDirectory, timestamp);
 
   await mkdir(acceptanceDirectory, { recursive: true });
   await ensureDoesNotExist(markdownPath);
   await ensureDoesNotExist(jsonPath);
 
-  const artifacts = [
-    path.relative(rootDirectory, markdownPath),
-    path.relative(rootDirectory, jsonPath),
-    "Add screenshots / exported previews / rendered diffs here",
-  ];
   const payload = {
     kind: "acceptance_report",
     timestamp,
@@ -195,32 +223,22 @@ async function main() {
     commands: preset.commands,
     steps: preset.steps,
     observations: preset.observations,
-    artifacts,
+    artifacts: [],
     follow_up: preset.follow_up,
   };
-
-  const markdown = buildMarkdown({
-    timestamp,
-    status,
-    scope,
-    owner,
-    scenario,
-    commands: payload.commands,
-    steps: payload.steps,
-    observations: payload.observations,
-    artifacts: payload.artifacts,
-    followUp: payload.follow_up,
-  });
-
-  await writeFile(markdownPath, markdown, "utf8");
-  await writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await writeAcceptanceReportFiles(acceptanceDirectory, payload);
 
   console.log(`acceptance report created: ${path.relative(rootDirectory, markdownPath)}`);
   console.log(`acceptance report created: ${path.relative(rootDirectory, jsonPath)}`);
 }
 
-void main().catch((error) => {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  console.error(message.replace(new RegExp(escapeRegExp(rootDirectory), "g"), "."));
-  process.exitCode = 1;
-});
+const isDirectExecution =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectExecution) {
+  void main().catch((error) => {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(message.replace(new RegExp(escapeRegExp(rootDirectory), "g"), "."));
+    process.exitCode = 1;
+  });
+}

@@ -725,6 +725,7 @@ export async function writeVectorAnalysisDraft(
 export async function writeHybridAnalysisDraft(
   job: ReconstructionJob,
   sourceQuadPixels: ReconstructionPoint[],
+  remapPreviewPath: string,
   outputDirectory: string,
 ) {
   const referenceWidth = job.referenceRaster?.width || job.referenceNode.width || 0;
@@ -734,7 +735,6 @@ export async function writeHybridAnalysisDraft(
   const baseName = sanitizeFileSegment(job.id);
   const draftPath = path.join(outputDirectory, `${baseName}-hybrid-analysis-draft.json`);
   const normalizedQuad = normalizeSourceQuad(sourceQuadPixels, referenceWidth, referenceHeight);
-  const remapPreviewPath = await writeRemapPreview(job, sourceQuadPixels, outputDirectory);
   const rectifiedPreviewDataUrl = await encodeImageFileAsDataUrl(remapPreviewPath);
   const payload: SubmitReconstructionAnalysisPayload = {
     analysisProvider: "codex-assisted",

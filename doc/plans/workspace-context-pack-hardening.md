@@ -18,6 +18,33 @@
 - 与 plugin / reconstruction 结果的职责分界固定
 - 语义增强只作为 context enrichment，不承诺生产级自动代码生成
 
+## Dependencies
+
+- `src/` workspace UI and read-model consumers
+- `server/api-routes.ts`
+- `shared/runtime-*.ts`
+- `shared/workspace-read-model.ts`
+- plugin selection / variable / metadata snapshots
+
+## Entry Conditions
+
+- workspace 已经有 `/api/workspace/read-model` 与 `/api/runtime/*` 基础读面
+- selection / design screen / mapping / review queue 基础存储结构已存在
+- `Plugin API + localhost bridge` 仍是 design truth 的唯一 live source
+
+## Workstreams
+
+- 把 runtime design facts 读层收敛成稳定 contract
+- 把 workspace 自身 catalog / mapping / review surface 收敛成 narrowed read-write model
+- 把 design truth 到前端改造上下文的 handoff 边界固定下来
+
+## Closure Tasks
+
+- 清掉 workspace 对原始 `/api/project`、bridge snapshot、command record 细节的剩余依赖
+- 把 `design-context`、`metadata`、`variable defs`、`node-metadata` 的 stale guard 和 dependency truth 消费路径收稳
+- 补齐 mapping contract、implementation target、evidence、review queue ownership 的显式输入输出
+- 明确 context enrichment 与生产级自动 codegen 的边界，避免 workspace 回流成黑盒生成管道
+
 ## Exit Conditions
 
 - context pack 与本地 design-context 读层可以稳定作为前端改造输入
@@ -43,3 +70,9 @@
 - 保留现有 context pack 能力
 - 回退高风险结构变更
 - 不回退文档治理边界
+
+## Verification
+
+- `npm run test:unit`
+- 涉及 workspace / runtime contract 时补 `npm run typecheck`
+- 涉及 owner boundary、truth store、runtime write surface 时补 `npm run governance:check`

@@ -9,6 +9,8 @@
 - 范围是什么
 - 为什么现在做
 - 依赖是什么
+- 主要工作流怎么拆
+- 离收口还差哪些子任务
 - 入口 / 出口条件是什么
 - 风险和回滚是什么
 
@@ -35,10 +37,18 @@
 - `Scope`
 - `Dependencies`
 - `Entry Conditions`
+- `Workstreams`
+- `Closure Tasks`
 - `Exit Conditions`
 - `Risks`
 - `Rollback`
 - `Verification`
+
+约束：
+
+- `Workstreams` 至少 2 条，回答“这项 active work 分几条线推进”
+- `Closure Tasks` 至少 3 条，回答“离 task 关闭还差哪些明确子任务”
+- 不使用 `done / in_progress` 之类执行状态去标记子任务；子任务只描述收口所需工作
 
 ## 禁止内容
 

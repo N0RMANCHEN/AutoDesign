@@ -119,6 +119,8 @@
 - live 验收脚手架默认入口：`npm run acceptance:new`
 - live 验收预检入口：`npm run acceptance:preflight`
 - live 验收一键准备入口：`npm run acceptance:prep`
+- 质量报告脚手架默认入口：`npm run quality:new`
+- reconstruction 质量报告一键准备入口：`npm run quality:prep`
 
 ## 3. 命名与结构规则
 

@@ -42,8 +42,10 @@ async function writeRules(tempDir: string) {
       reportContractFiles: [
         "reports/acceptance/TEMPLATE.md",
         "reports/acceptance/TEMPLATE.json",
+        "reports/acceptance/RUNBOOK.md",
         "reports/quality/TEMPLATE.md",
         "reports/quality/TEMPLATE.json",
+        "reports/quality/RUNBOOK.md",
         "schemas/acceptance-report.schema.json",
         "schemas/quality-report.schema.json",
       ],
@@ -66,8 +68,10 @@ async function writeCommonFixture(tempDir: string) {
   await writeFile(path.join(tempDir, "doc", "plans", "r1.md"), "# R1 Plan\n", "utf8");
   await writeFile(path.join(tempDir, "reports", "acceptance", "TEMPLATE.md"), "# Acceptance\n", "utf8");
   await writeFile(path.join(tempDir, "reports", "acceptance", "TEMPLATE.json"), "{}\n", "utf8");
+  await writeFile(path.join(tempDir, "reports", "acceptance", "RUNBOOK.md"), "# Acceptance Runbook\n", "utf8");
   await writeFile(path.join(tempDir, "reports", "quality", "TEMPLATE.md"), "# Quality\n", "utf8");
   await writeFile(path.join(tempDir, "reports", "quality", "TEMPLATE.json"), "{}\n", "utf8");
+  await writeFile(path.join(tempDir, "reports", "quality", "RUNBOOK.md"), "# Quality Runbook\n", "utf8");
   await writeFile(path.join(tempDir, "schemas", "acceptance-report.schema.json"), "{}\n", "utf8");
   await writeFile(path.join(tempDir, "schemas", "quality-report.schema.json"), "{}\n", "utf8");
 }
@@ -86,6 +90,12 @@ function buildRoadmap(statusLine: string, extraBody = "") {
 - 状态：\`${statusLine}\`
 - 目标：test task
 - Plan：[r1.md](plans/r1.md)
+- 当前收口子任务：
+  - closure task a
+  - closure task b
+- 完成判据：
+  - exit gate a
+  - exit gate b
 ${extraBody}
 
 ## 4. Archive Handoff
@@ -136,6 +146,46 @@ test("check_roadmap_reports_consistency fails when acceptance_pending work omits
         const stderr = String(error.stderr || "");
         assert.match(stderr, /check:roadmap-reports failed/);
         assert.match(stderr, /acceptance_pending task missing acceptance_owner: R1 EXAMPLE TASK/);
+        return true;
+      },
+    );
+  });
+});
+
+test("check_roadmap_reports_consistency fails when a roadmap task omits closure subtasks or completion criteria", async () => {
+  await withTempRepo(async (tempDir) => {
+    await writeRules(tempDir);
+    await writeCommonFixture(tempDir);
+    await writeFile(
+      path.join(tempDir, "doc", "Roadmap.md"),
+      `# Roadmap
+
+## 2. Current
+
+- \`support_boundary\`: test boundary
+
+## 3. Active Work
+
+### R1 EXAMPLE TASK
+
+- 状态：\`in_progress\`
+- 目标：test task
+- Plan：[r1.md](plans/r1.md)
+
+## 4. Archive Handoff
+
+- archive pointer
+`,
+      "utf8",
+    );
+
+    await assert.rejects(
+      execFileAsync(process.execPath, [scriptPath], { cwd: tempDir }),
+      (error: any) => {
+        const stderr = String(error.stderr || "");
+        assert.match(stderr, /check:roadmap-reports failed/);
+        assert.match(stderr, /roadmap task missing 当前收口子任务: R1 EXAMPLE TASK/);
+        assert.match(stderr, /roadmap task missing 完成判据: R1 EXAMPLE TASK/);
         return true;
       },
     );

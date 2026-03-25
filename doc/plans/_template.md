@@ -16,6 +16,16 @@
 
 - 开始实施前必须满足的条件
 
+## Workstreams
+
+- 拆出 2-4 条主要实施工作流
+
+## Closure Tasks
+
+- 列出离 task 关闭还差哪些明确子任务
+- 不写 `done / in_progress`
+- 默认至少 3 条
+
 ## Exit Conditions
 
 - 什么结果算完成

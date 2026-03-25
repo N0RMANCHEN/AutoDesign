@@ -36,6 +36,10 @@
     {
       "doc": "reports/README.md",
       "path": "schemas/quality-report.schema.json"
+    },
+    {
+      "doc": "reports/README.md",
+      "path": "reports/quality/RUNBOOK.md"
     }
   ],
   "fieldAssertions": [
@@ -86,6 +90,10 @@
     {
       "doc": "reports/quality/README.md",
       "mustContain": "`quality-YYYYMMDD-HHMMSS.md` + `quality-YYYYMMDD-HHMMSS.json`"
+    },
+    {
+      "doc": "reports/quality/README.md",
+      "mustContain": "`npm run quality:prep -- --job <JOB_ID> --owner <name>`"
     }
   ],
   "roadmapSemantics": {
@@ -125,8 +133,10 @@
     "reportContractFiles": [
       "reports/acceptance/TEMPLATE.md",
       "reports/acceptance/TEMPLATE.json",
+      "reports/acceptance/RUNBOOK.md",
       "reports/quality/TEMPLATE.md",
       "reports/quality/TEMPLATE.json",
+      "reports/quality/RUNBOOK.md",
       "schemas/acceptance-report.schema.json",
       "schemas/quality-report.schema.json"
     ]
