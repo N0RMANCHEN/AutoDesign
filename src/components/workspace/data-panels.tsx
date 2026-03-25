@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import type { WorkspaceLibraryAssetSearchResponse } from "../../../shared/workspace-library-assets";
 import { filterWorkspaceLibraryAssetCards } from "../../../shared/workspace-library-assets";
 import type { WorkspaceReadModel } from "../../../shared/workspace-read-model";
 import { Panel } from "./panel";
@@ -59,10 +60,68 @@ export function WorkspaceDataColumns(props: {
     workspaceModel,
   } = props;
   const [assetQuery, setAssetQuery] = useState("");
-  const visibleLibraryAssets = filterWorkspaceLibraryAssetCards({
-    assets: workspaceModel.libraryAssets,
-    query: assetQuery,
-  });
+  const [visibleLibraryAssets, setVisibleLibraryAssets] = useState(
+    workspaceModel.libraryAssets,
+  );
+  const [assetSearchMessage, setAssetSearchMessage] = useState("");
+  const [isAssetSearchBusy, setIsAssetSearchBusy] = useState(false);
+
+  useEffect(() => {
+    const query = assetQuery.trim();
+
+    if (!query) {
+      setVisibleLibraryAssets(workspaceModel.libraryAssets);
+      setAssetSearchMessage("");
+      setIsAssetSearchBusy(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsAssetSearchBusy(true);
+    setAssetSearchMessage("");
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/workspace/library-assets/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query }),
+        });
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const payload = (await response.json()) as WorkspaceLibraryAssetSearchResponse;
+        if (cancelled) {
+          return;
+        }
+        setVisibleLibraryAssets(payload.results);
+        setAssetSearchMessage(`服务端命中 ${payload.total} 个资产。`);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setVisibleLibraryAssets(
+          filterWorkspaceLibraryAssetCards({
+            assets: workspaceModel.libraryAssets,
+            query,
+          }),
+        );
+        setAssetSearchMessage(
+          error instanceof Error
+            ? `资产搜索回退到本地 narrowed cards：${error.message}`
+            : "资产搜索回退到本地 narrowed cards。",
+        );
+      } finally {
+        if (!cancelled) {
+          setIsAssetSearchBusy(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetQuery, workspaceModel.libraryAssets]);
 
   return (
     <>
@@ -148,7 +207,10 @@ export function WorkspaceDataColumns(props: {
             </label>
             <p className="muted-line">
               {assetQuery.trim()
-                ? `匹配 ${visibleLibraryAssets.length} / ${workspaceModel.libraryAssets.length} 个资产。`
+                ? assetSearchMessage ||
+                  (isAssetSearchBusy
+                    ? "正在从 workspace surface 搜索资产…"
+                    : `匹配 ${visibleLibraryAssets.length} / ${workspaceModel.libraryAssets.length} 个资产。`)
                 : `当前资产目录共 ${workspaceModel.libraryAssets.length} 项。`}
             </p>
             {visibleLibraryAssets.length > 0 ? (
