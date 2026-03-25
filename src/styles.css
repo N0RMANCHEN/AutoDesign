@@ -363,6 +363,10 @@ input {
   margin: 0;
 }
 
+.code-box-compact {
+  min-height: 120px;
+}
+
 .sync-panel {
   display: grid;
   gap: 14px;

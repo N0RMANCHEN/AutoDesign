@@ -43,6 +43,8 @@ function createProject(): ProjectData {
         states: ["default", "loading"],
         notes: "Maps hero card UI",
         screenIds: ["screen-1"],
+        implementationTarget: null,
+        evidence: [],
       },
     ],
     reviewItems: [

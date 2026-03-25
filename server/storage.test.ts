@@ -48,7 +48,11 @@ test("readProject seeds the workspace when no project file exists", async () => 
 });
 
 test("readProject migrates the legacy project file when the new one is absent", async () => {
-  const { libraryAssets: _legacyAssets, ...legacyProjectBase } = seededProject;
+  const {
+    libraryAssets: _legacyAssets,
+    componentMappings: legacyComponentMappings,
+    ...legacyProjectBase
+  } = seededProject;
 
   await withTempProjectStore(
     async (store) => {
@@ -58,10 +62,13 @@ test("readProject migrates the legacy project file when the new one is absent", 
       assert.equal(project.designSources.length, 1);
       assert.equal(project.designSources[0]?.id, "legacy-source");
       assert.deepEqual(project.libraryAssets, []);
+      assert.equal(project.componentMappings[0]?.implementationTarget, null);
+      assert.deepEqual(project.componentMappings[0]?.evidence, []);
     },
     {
       legacyProject: {
         ...legacyProjectBase,
+        componentMappings: legacyComponentMappings.map(({ implementationTarget, evidence, ...mapping }) => mapping),
         meta: {
           ...seededProject.meta,
           id: "legacy-project",

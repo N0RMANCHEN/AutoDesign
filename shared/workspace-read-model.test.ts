@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { seededProject } from "./seed.js";
 import {
+  buildWorkspaceMappingContractReceipt,
   buildWorkspaceMappingStatusReceipt,
   buildWorkspaceReadModel,
   buildWorkspaceReviewQueueUpdateReceipt,
@@ -63,6 +64,23 @@ test("buildWorkspaceReadModel narrows project data into a workspace-facing read 
     "Buttons / States",
     "Onboarding / Welcome",
   ]);
+  assert.deepEqual(readModel.mappings[2]?.implementationTarget, {
+    packageName: "@autodesign/ui",
+    path: "src/components/buttons/PrimaryButton.tsx",
+    exportName: "PrimaryButton",
+  });
+  assert.deepEqual(readModel.mappings[2]?.evidence, [
+    {
+      kind: "story",
+      label: "Storybook / PrimaryButton",
+      href: "src/components/buttons/PrimaryButton.stories.tsx",
+    },
+    {
+      kind: "test",
+      label: "PrimaryButton loading regression",
+      href: "src/components/buttons/PrimaryButton.test.tsx",
+    },
+  ]);
   assert.deepEqual(readModel.reviewQueue[0]?.relatedLabels, [
     "Onboarding / Welcome",
     "Welcome Hero Card",
@@ -81,6 +99,26 @@ test("buildWorkspaceMappingStatusReceipt reuses the narrowed mapping card contra
   assert.equal(receipt.mapping.id, "mapping-account-tile");
   assert.equal(receipt.mapping.status, "planned");
   assert.deepEqual(receipt.mapping.screenNames, ["Dashboard / Account Overview"]);
+  assert.equal(receipt.mapping.implementationTarget, null);
+  assert.deepEqual(receipt.mapping.evidence, [
+    {
+      kind: "spec",
+      label: "Balance mask loading rule",
+      href: "doc/specs/account-overview-tile.md",
+    },
+  ]);
+  assert.equal(receipt.workspaceUpdatedAt, seededProject.meta.updatedAt);
+});
+
+test("buildWorkspaceMappingContractReceipt reuses the narrowed mapping card contract", () => {
+  const receipt = buildWorkspaceMappingContractReceipt({
+    project: seededProject,
+    mapping: seededProject.componentMappings[0]!,
+  });
+
+  assert.equal(receipt.mapping.id, "mapping-hero-card");
+  assert.equal(receipt.mapping.implementationTarget?.exportName, "HeroIntroCard");
+  assert.equal(receipt.mapping.evidence.length, 2);
   assert.equal(receipt.workspaceUpdatedAt, seededProject.meta.updatedAt);
 });
 

@@ -15,6 +15,7 @@
 - Phase 2: 收紧 design system 等价面
   - 收敛 component mapping、review queue、Code Connect-like mapping contract
   - 当前真相：`library asset` 已补成 `ProjectData -> workspace asset catalog -> /api/workspace/library-assets/search` 的本地 read/search 边界，workspace UI 只消费 narrowed asset card，不再理解底层 asset relation ids
+  - 当前真相：component mapping 的 implementation target / evidence 已补成 `ProjectData -> workspace mapping card -> /api/workspace/mapping-contract` 的显式 contract，workspace UI 不再把 Code Connect-like 真相埋在 `notes`
   - 输出 design-system-aware rules / instructions，而不是直接承诺生产级代码生成
 - Phase 3: 收紧 safe write parity 子集
   - 在本地 plugin runtime / bridge 下补齐与 `use_figma` 重叠的高价值安全子集

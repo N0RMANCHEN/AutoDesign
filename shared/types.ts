@@ -1,6 +1,8 @@
 export type SyncStatus = "connected" | "draft" | "stale";
 export type MappingStatus = "planned" | "prototype" | "verified";
 export type ReviewStatus = "todo" | "doing" | "done";
+export const mappingEvidenceKinds = ["story", "spec", "test", "screenshot"] as const;
+export type MappingEvidenceKind = (typeof mappingEvidenceKinds)[number];
 export const libraryAssetKinds = ["component", "icon", "illustration"] as const;
 export type LibraryAssetKind = (typeof libraryAssetKinds)[number];
 export type GraphKind = "codegraph" | "knowledge";
@@ -47,6 +49,16 @@ export type ComponentMapping = {
   states: string[];
   notes: string;
   screenIds: string[];
+  implementationTarget: {
+    packageName: string | null;
+    path: string;
+    exportName: string;
+  } | null;
+  evidence: Array<{
+    kind: MappingEvidenceKind;
+    label: string;
+    href: string;
+  }>;
 };
 
 export type ReviewItem = {
@@ -139,8 +151,8 @@ export type FigmaSyncPayload = {
     designName: string;
     reactName: string;
     props: string[];
-      states: string[];
-      notes: string;
+    states: string[];
+    notes: string;
   }>;
   assets?: Array<{
     name: string;

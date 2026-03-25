@@ -72,7 +72,7 @@
 - 目标：把工作台从“上下文整理”继续推进到更稳定的前端改造入口
 - Plan：[workspace-context-pack-hardening.md](plans/workspace-context-pack-hardening.md)
 - 当前重点：
-  - context pack、`design-context`、`metadata`、`variable defs` 的 read contract 收敛；`variable defs` 已支持按 `targetSessionId` 读取 live local snapshot，`design-context` 已开始直接携带 plugin selection dependency truth，workspace 测试台也开始优先消费 `design-context`，并对 selection / action / session 变化做 stale guard；bridge 状态读取已切到专用 `bridge-overview` read model，命令下发也已补上 `bridge-dispatch` runtime write receipt，workspace 不再直接依赖原始 `PluginBridgeCommandRecord`；workspace 自身的 design source / screen catalog / library asset catalog / mapping / review queue 视图也已切到 `/api/workspace/read-model`，`mapping-status`、`review-queue-item`、`figma-sync`、`reset` 走窄化 write surface，legacy `/api/project`、`/api/project/reset`、`/api/figma/sync` 也已退场，`/api/workspace/library-assets/search` 负责窄化后的资产搜索，UI 不再直接消费 `/api/project`，也不再需要从泛化 `selection.options` 里反推 design screen truth；`node-metadata` 也已暴露 style / variable bindings truth，并可解析到 local style / variable definitions；当前还会返回子树级 style / variable dependency pack，方便 workspace 和 Figma-to-React 直接消费
+  - context pack、`design-context`、`metadata`、`variable defs` 的 read contract 收敛；`variable defs` 已支持按 `targetSessionId` 读取 live local snapshot，`design-context` 已开始直接携带 plugin selection dependency truth，workspace 测试台也开始优先消费 `design-context`，并对 selection / action / session 变化做 stale guard；bridge 状态读取已切到专用 `bridge-overview` read model，命令下发也已补上 `bridge-dispatch` runtime write receipt，workspace 不再直接依赖原始 `PluginBridgeCommandRecord`；workspace 自身的 design source / screen catalog / library asset catalog / mapping / review queue 视图也已切到 `/api/workspace/read-model`，`mapping-status`、`mapping-contract`、`review-queue-item`、`figma-sync`、`reset` 走窄化 write surface，legacy `/api/project`、`/api/project/reset`、`/api/figma/sync` 也已退场，`/api/workspace/library-assets/search` 负责窄化后的资产搜索，mapping 里的 implementation target / evidence 也已从 `notes` 中拆成显式 contract，UI 不再直接消费 `/api/project`，也不再需要从泛化 `selection.options` 里反推 design screen truth；`node-metadata` 也已暴露 style / variable bindings truth，并可解析到 local style / variable definitions；当前还会返回子树级 style / variable dependency pack，方便 workspace 和 Figma-to-React 直接消费
   - component mapping 和 review queue 可追踪化
   - layout / constraints / component / variant / preview metadata 先作为稳定设计事实输入
   - 与 plugin / reconstruction 结果的边界收敛
@@ -86,7 +86,7 @@
 - Plan：[figma-mcp-alignment.md](plans/figma-mcp-alignment.md)
 - 当前重点：
   - Phase 1 先对齐结构化设计事实提取：`get_design_context`、`get_variable_defs`、`get_metadata`、`get_screenshot` 的本地 contract；其中 `get_variable_defs` 已具备 session-targeted live local snapshot
-  - design system 面继续收紧 component mapping、review queue、Code Connect-like mapping；library asset read/search 已补成 workspace catalog + search contract，后续继续收窄 Code Connect-like mapping
+  - design system 面继续收紧 component mapping、review queue、Code Connect-like mapping；library asset read/search 已补成 workspace catalog + search contract，mapping 的 implementation target / evidence 也已补成显式 contract，后续继续收窄更细的 Code Connect-like link semantics
   - write 面只对齐与 `use_figma` 重叠的安全高价值子集：pages / sections、完整 variables、variants / instance property / override、layout / style
   - prototype / interaction 当前只允许 read-only metadata 研究，不直接承诺 business logic / routing / form generation
   - 明确 remote hosted MCP、`whoami`、FigJam、Make、browser code-to-canvas 不进入当前阶段主线

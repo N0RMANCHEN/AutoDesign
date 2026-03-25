@@ -1,4 +1,5 @@
 import type {
+  MappingEvidenceKind,
   MappingStatus,
   ProjectData,
   ReviewStatus,
@@ -52,6 +53,16 @@ export type WorkspaceMappingCard = {
   props: string[];
   states: string[];
   screenNames: string[];
+  implementationTarget: {
+    packageName: string | null;
+    path: string;
+    exportName: string;
+  } | null;
+  evidence: Array<{
+    kind: MappingEvidenceKind;
+    label: string;
+    href: string;
+  }>;
 };
 
 export type WorkspaceReviewQueueCard = {
@@ -83,6 +94,11 @@ export type WorkspaceReadModel = {
 };
 
 export type WorkspaceMappingStatusReceipt = {
+  mapping: WorkspaceMappingCard;
+  workspaceUpdatedAt: string;
+};
+
+export type WorkspaceMappingContractReceipt = {
   mapping: WorkspaceMappingCard;
   workspaceUpdatedAt: string;
 };
@@ -124,6 +140,18 @@ function buildWorkspaceMappingCard(params: {
     props: mapping.props,
     states: mapping.states,
     screenNames: uniqueStrings(mapping.screenIds.map((screenId) => screenLookup.get(screenId) ?? screenId)),
+    implementationTarget: mapping.implementationTarget
+      ? {
+          packageName: mapping.implementationTarget.packageName,
+          path: mapping.implementationTarget.path,
+          exportName: mapping.implementationTarget.exportName,
+        }
+      : null,
+    evidence: mapping.evidence.map((item) => ({
+      kind: item.kind,
+      label: item.label,
+      href: item.href,
+    })),
   };
 }
 
@@ -264,6 +292,13 @@ export function buildWorkspaceMappingStatusReceipt(params: {
   project: ProjectData;
   mapping: ProjectData["componentMappings"][number];
 }): WorkspaceMappingStatusReceipt {
+  return buildWorkspaceMappingContractReceipt(params);
+}
+
+export function buildWorkspaceMappingContractReceipt(params: {
+  project: ProjectData;
+  mapping: ProjectData["componentMappings"][number];
+}): WorkspaceMappingContractReceipt {
   const { mapping, project } = params;
   return {
     mapping: buildWorkspaceMappingCard({ project, mapping }),

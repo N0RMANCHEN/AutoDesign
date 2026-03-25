@@ -64,6 +64,23 @@ export const seededProject: ProjectData = {
       states: ["default", "loading"],
       notes: "设计稿里 CTA 的次级说明需要保留为可选 props，避免写死。",
       screenIds: ["screen-onboarding"],
+      implementationTarget: {
+        packageName: "@autodesign/ui",
+        path: "src/components/cards/HeroIntroCard.tsx",
+        exportName: "HeroIntroCard",
+      },
+      evidence: [
+        {
+          kind: "story",
+          label: "Storybook / HeroIntroCard",
+          href: "src/components/cards/HeroIntroCard.stories.tsx",
+        },
+        {
+          kind: "spec",
+          label: "CTA copy contract",
+          href: "doc/specs/hero-intro-card.md",
+        },
+      ],
     },
     {
       id: "mapping-account-tile",
@@ -74,6 +91,14 @@ export const seededProject: ProjectData = {
       states: ["default", "skeleton", "empty"],
       notes: "余额显隐逻辑要和设计上的 masked 状态保持一致。",
       screenIds: ["screen-dashboard"],
+      implementationTarget: null,
+      evidence: [
+        {
+          kind: "spec",
+          label: "Balance mask loading rule",
+          href: "doc/specs/account-overview-tile.md",
+        },
+      ],
     },
     {
       id: "mapping-button-primary",
@@ -84,6 +109,23 @@ export const seededProject: ProjectData = {
       states: ["default", "hover", "disabled", "loading"],
       notes: "按钮尺寸与 loading icon 对齐是当前最稳定的一条映射。",
       screenIds: ["screen-button-system", "screen-onboarding"],
+      implementationTarget: {
+        packageName: "@autodesign/ui",
+        path: "src/components/buttons/PrimaryButton.tsx",
+        exportName: "PrimaryButton",
+      },
+      evidence: [
+        {
+          kind: "story",
+          label: "Storybook / PrimaryButton",
+          href: "src/components/buttons/PrimaryButton.stories.tsx",
+        },
+        {
+          kind: "test",
+          label: "PrimaryButton loading regression",
+          href: "src/components/buttons/PrimaryButton.test.tsx",
+        },
+      ],
     },
   ],
   reviewItems: [

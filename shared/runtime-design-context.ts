@@ -130,11 +130,14 @@ function toScreenMetadata(screen: DesignScreen): RuntimeDesignContextMetadataIte
 }
 
 function toMappingMetadata(mapping: ComponentMapping): RuntimeDesignContextMetadataItem {
+  const target = mapping.implementationTarget
+    ? `${mapping.implementationTarget.path}#${mapping.implementationTarget.exportName}`
+    : "unlinked";
   return {
     id: mapping.id,
     kind: "component",
     title: `${mapping.designName} -> ${mapping.reactName}`,
-    summary: `${mapping.notes} | status=${mapping.status}`,
+    summary: `${mapping.notes} | status=${mapping.status} | target=${target} | evidence=${mapping.evidence.length}`,
     relatedIds: mapping.screenIds,
   };
 }

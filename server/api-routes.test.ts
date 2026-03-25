@@ -524,6 +524,12 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
       "Buttons / States",
       "Onboarding / Welcome",
     ]);
+    assert.equal(
+      workspace.body.mappings[0]?.implementationTarget?.path,
+      "src/components/cards/HeroIntroCard.tsx",
+    );
+    assert.equal(workspace.body.mappings[1]?.implementationTarget, null);
+    assert.equal(workspace.body.mappings[0]?.evidence?.length, 2);
     assert.deepEqual(workspace.body.reviewQueue[0]?.relatedLabels, [
       "Onboarding / Welcome",
       "Welcome Hero Card",
@@ -545,6 +551,7 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
     assert.equal(receipt.body.mapping.id, "mapping-account-tile");
     assert.equal(receipt.body.mapping.status, "verified");
     assert.deepEqual(receipt.body.mapping.screenNames, ["Dashboard / Account Overview"]);
+    assert.equal(receipt.body.mapping.implementationTarget, null);
     assert.match(String(receipt.body.workspaceUpdatedAt), /^\d{4}-\d{2}-\d{2}T/);
 
     const updatedWorkspace = await requestJson<any>(server, "/api/workspace/read-model");
@@ -552,6 +559,70 @@ test("api_routes expose a narrowed workspace read model and mapping-status write
       updatedWorkspace.body.mappings.find((item: any) => item.id === "mapping-account-tile")?.status,
       "verified",
     );
+  });
+});
+
+test("api_routes expose mapping contract write receipts and reject invalid evidence payloads", async () => {
+  await withInMemoryServer(async (server) => {
+    const receipt = await requestJson<any>(server, "/api/workspace/mapping-contract", {
+      method: "POST",
+      body: JSON.stringify({
+        mappingId: "mapping-account-tile",
+        implementationTarget: {
+          packageName: "@autodesign/app",
+          path: "src/components/account/AccountOverviewTile.tsx",
+          exportName: "AccountOverviewTile",
+        },
+        evidence: [
+          {
+            kind: "story",
+            label: "Storybook / AccountOverviewTile",
+            href: "src/components/account/AccountOverviewTile.stories.tsx",
+          },
+          {
+            kind: "test",
+            label: "Balance mask regression",
+            href: "src/components/account/AccountOverviewTile.test.tsx",
+          },
+        ],
+      }),
+    });
+
+    assert.equal(receipt.response.status, 200);
+    assert.equal(receipt.body.mapping.id, "mapping-account-tile");
+    assert.equal(
+      receipt.body.mapping.implementationTarget?.path,
+      "src/components/account/AccountOverviewTile.tsx",
+    );
+    assert.equal(receipt.body.mapping.evidence.length, 2);
+    assert.equal(receipt.body.mapping.screenIds, undefined);
+
+    const updatedWorkspace = await requestJson<any>(server, "/api/workspace/read-model");
+    const updatedMapping = updatedWorkspace.body.mappings.find((item: any) => item.id === "mapping-account-tile");
+    assert.equal(
+      updatedMapping?.implementationTarget?.exportName,
+      "AccountOverviewTile",
+    );
+    assert.equal(updatedMapping?.evidence?.length, 2);
+
+    const invalidEvidence = await requestJson<any>(server, "/api/workspace/mapping-contract", {
+      method: "POST",
+      body: JSON.stringify({
+        mappingId: "mapping-account-tile",
+        implementationTarget: {
+          path: "src/components/account/AccountOverviewTile.tsx",
+          exportName: "AccountOverviewTile",
+        },
+        evidence: [
+          {
+            kind: "preview",
+            label: "Invalid kind",
+            href: "reports/invalid.md",
+          },
+        ],
+      }),
+    });
+    assert.equal(invalidEvidence.response.status, 400);
   });
 });
 
@@ -631,6 +702,11 @@ test("api_routes expose workspace-scoped figma sync and reset surfaces", async (
     assert.equal(synced.body.designSources[0]?.id, "source-billing-flow");
     assert.ok(
       synced.body.mappings.some((mapping: { id: string }) => mapping.id === "mapping-billing-summary-card"),
+    );
+    assert.equal(
+      synced.body.mappings.find((mapping: { id: string }) => mapping.id === "mapping-billing-summary-card")
+        ?.implementationTarget,
+      null,
     );
     assert.ok(
       synced.body.selection.options.some((item: { id: string }) => item.id === "screen-billing-review"),

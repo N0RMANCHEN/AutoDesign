@@ -15,6 +15,7 @@ import type {
   RuntimeEnvelope,
 } from "../../../shared/types";
 import type {
+  WorkspaceMappingContractReceipt,
   WorkspaceMappingStatusReceipt,
   WorkspaceReadModel,
   WorkspaceReviewQueueUpdateReceipt,
@@ -24,6 +25,7 @@ import {
   WorkspaceBridgeStatusPanel,
 } from "./bridge-panels";
 import {
+  type MappingContractInput,
   WorkspaceDataColumns,
   type ReviewQueueDraft,
 } from "./data-panels";
@@ -169,6 +171,7 @@ export function WorkspaceShell() {
   const [selectedBridgeSessionId, setSelectedBridgeSessionId] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [bridgeMessage, setBridgeMessage] = useState("");
+  const [mappingMessage, setMappingMessage] = useState("");
   const [reviewMessage, setReviewMessage] = useState("");
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewQueueDraft>>({});
   const [isBusy, setIsBusy] = useState(false);
@@ -191,6 +194,7 @@ export function WorkspaceShell() {
     try {
       const nextWorkspace = await fetchJson<WorkspaceReadModel>("/api/workspace/read-model");
       setWorkspaceModel(nextWorkspace);
+      setMappingMessage("");
       setSelectionIds((current) =>
         reconcileSelectionIds({
           current,
@@ -255,6 +259,7 @@ export function WorkspaceShell() {
       setContextPack(null);
       setRuntimeOutput(null);
       setLastBridgeDispatchReceipt(null);
+      setMappingMessage("");
       setReviewDrafts({});
       setReviewMessage("");
       setSyncMessage("已重置为内置示例数据。");
@@ -323,6 +328,7 @@ export function WorkspaceShell() {
         body: JSON.stringify(payload),
       });
       setWorkspaceModel(nextWorkspace);
+      setMappingMessage("");
       setSelectionIds((current) =>
         reconcileSelectionIds({
           current,
@@ -425,6 +431,49 @@ export function WorkspaceShell() {
         setIsBusy(false);
       }
     })();
+  }
+
+  async function updateMappingContract(
+    mappingId: string,
+    payload: MappingContractInput,
+  ) {
+    setIsBusy(true);
+    try {
+      const receipt = await fetchJson<WorkspaceMappingContractReceipt>(
+        "/api/workspace/mapping-contract",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mappingId,
+            implementationTarget: payload.implementationTarget,
+            evidence: payload.evidence,
+          }),
+        },
+      );
+      setWorkspaceModel((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          workspace: {
+            ...current.workspace,
+            updatedAt: receipt.workspaceUpdatedAt,
+          },
+          mappings: current.mappings.map((mapping) =>
+            mapping.id === mappingId ? receipt.mapping : mapping,
+          ),
+        };
+      });
+      setMappingMessage(`已更新 mapping contract：${receipt.mapping.designName}`);
+    } catch (error) {
+      setMappingMessage(
+        error instanceof Error ? `mapping contract 更新失败：${error.message}` : "mapping contract 更新失败：未知错误",
+      );
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   function updateReviewDraft(
@@ -563,6 +612,10 @@ export function WorkspaceShell() {
       <section className="workspace-grid">
         <WorkspaceDataColumns
           isBusy={isBusy}
+          mappingMessage={mappingMessage}
+          onSaveMappingContract={(mappingId, payload) => {
+            void updateMappingContract(mappingId, payload);
+          }}
           onReviewDraftChange={updateReviewDraft}
           onReviewSave={(reviewId, draft) => {
             void updateReviewQueueItem(reviewId, draft);

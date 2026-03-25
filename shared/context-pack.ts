@@ -31,11 +31,14 @@ function fromScreen(screen: DesignScreen, index: number): ContextPackNode {
 }
 
 function fromMapping(mapping: ComponentMapping, index: number): ContextPackNode {
+  const target = mapping.implementationTarget
+    ? `${mapping.implementationTarget.path}#${mapping.implementationTarget.exportName}`
+    : "unlinked";
   return {
     id: mapping.id,
     kind: "component",
     title: `${mapping.designName} -> ${mapping.reactName}`,
-    summary: `${mapping.notes} | props=${mapping.props.join(", ")} | states=${mapping.states.join(", ")}`,
+    summary: `${mapping.notes} | props=${mapping.props.join(", ")} | states=${mapping.states.join(", ")} | target=${target} | evidence=${mapping.evidence.length}`,
     position: { x: 740, y: 120 + index * 160 },
   };
 }

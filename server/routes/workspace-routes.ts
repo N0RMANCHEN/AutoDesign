@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  mappingEvidenceKinds,
   libraryAssetKinds,
   type FigmaSyncPayload,
   type LibraryAssetKind,
+  type MappingEvidenceKind,
   type MappingStatus,
   type ProjectData,
   type ReviewStatus,
@@ -11,6 +13,7 @@ import {
 import { nowIso, slugify } from "../../shared/utils.js";
 import { buildWorkspaceLibraryAssetSearchResponse } from "../../shared/workspace-library-assets.js";
 import {
+  buildWorkspaceMappingContractReceipt,
   buildWorkspaceMappingStatusReceipt,
   buildWorkspaceReadModel,
   buildWorkspaceReviewQueueUpdateReceipt,
@@ -77,6 +80,8 @@ function applyFigmaSyncPayload(params: {
         notes: component.notes,
         status: "prototype",
         screenIds: [],
+        implementationTarget: null,
+        evidence: [],
       });
     }
   });
@@ -184,6 +189,183 @@ async function handleWorkspaceMappingStatus(
     response,
     200,
     buildWorkspaceMappingStatusReceipt({
+      project: saved,
+      mapping: savedMapping,
+    }),
+  );
+}
+
+function normalizeMappingContractImplementationTarget(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return {
+      ok: false as const,
+      error: "implementationTarget is required",
+    };
+  }
+
+  const record = value as {
+    packageName?: unknown;
+    path?: unknown;
+    exportName?: unknown;
+  };
+  const path = typeof record.path === "string" ? record.path.trim() : "";
+  const exportName = typeof record.exportName === "string" ? record.exportName.trim() : "";
+  const packageName = typeof record.packageName === "string" ? record.packageName.trim() : "";
+
+  if (!path) {
+    return {
+      ok: false as const,
+      error: "implementationTarget.path is required",
+    };
+  }
+
+  if (!exportName) {
+    return {
+      ok: false as const,
+      error: "implementationTarget.exportName is required",
+    };
+  }
+
+  return {
+    ok: true as const,
+    value: {
+      packageName: packageName || null,
+      path,
+      exportName,
+    },
+  };
+}
+
+function normalizeMappingContractEvidence(value: unknown) {
+  if (!Array.isArray(value)) {
+    return {
+      ok: false as const,
+      error: "evidence must be an array",
+    };
+  }
+
+  const evidence: Array<{
+    kind: MappingEvidenceKind;
+    label: string;
+    href: string;
+  }> = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      return {
+        ok: false as const,
+        error: "evidence items must be objects",
+      };
+    }
+
+    const record = item as {
+      kind?: unknown;
+      label?: unknown;
+      href?: unknown;
+    };
+    const kind = typeof record.kind === "string" ? record.kind.trim() : "";
+    const label = typeof record.label === "string" ? record.label.trim() : "";
+    const href = typeof record.href === "string" ? record.href.trim() : "";
+
+    if (!mappingEvidenceKinds.includes(kind as MappingEvidenceKind)) {
+      return {
+        ok: false as const,
+        error: `evidence.kind must be one of ${mappingEvidenceKinds.join(", ")}`,
+      };
+    }
+
+    if (!label) {
+      return {
+        ok: false as const,
+        error: "evidence.label is required",
+      };
+    }
+
+    if (!href) {
+      return {
+        ok: false as const,
+        error: "evidence.href is required",
+      };
+    }
+
+    evidence.push({
+      kind: kind as MappingEvidenceKind,
+      label,
+      href,
+    });
+  }
+
+  return {
+    ok: true as const,
+    value: evidence,
+  };
+}
+
+async function handleWorkspaceMappingContract(
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  const body = await readBody<{
+    mappingId?: string;
+    implementationTarget?: {
+      packageName?: string;
+      path?: string;
+      exportName?: string;
+    };
+    evidence?: Array<{
+      kind?: MappingEvidenceKind;
+      label?: string;
+      href?: string;
+    }>;
+  }>(request);
+  const mappingId = String(body.mappingId || "").trim();
+
+  if (!mappingId) {
+    sendJson(response, 400, { ok: false, error: "mappingId is required" });
+    return;
+  }
+
+  const implementationTarget = normalizeMappingContractImplementationTarget(body.implementationTarget);
+  if (!implementationTarget.ok) {
+    sendJson(response, 400, { ok: false, error: implementationTarget.error });
+    return;
+  }
+
+  const evidence = normalizeMappingContractEvidence(body.evidence);
+  if (!evidence.ok) {
+    sendJson(response, 400, { ok: false, error: evidence.error });
+    return;
+  }
+
+  const project = await readProject();
+  const mapping = project.componentMappings.find((item) => item.id === mappingId);
+  if (!mapping) {
+    sendJson(response, 404, { ok: false, error: "Mapping not found" });
+    return;
+  }
+
+  const saved = await writeProject({
+    ...project,
+    componentMappings: project.componentMappings.map((item) =>
+      item.id === mappingId
+        ? {
+            ...item,
+            implementationTarget: implementationTarget.value,
+            evidence: evidence.value,
+          }
+        : item,
+    ),
+  });
+  const savedMapping = saved.componentMappings.find((item) => item.id === mappingId);
+  if (!savedMapping) {
+    sendJson(response, 500, { ok: false, error: "Saved mapping missing" });
+    return;
+  }
+
+  sendJson(
+    response,
+    200,
+    buildWorkspaceMappingContractReceipt({
       project: saved,
       mapping: savedMapping,
     }),
@@ -316,6 +498,11 @@ export async function tryHandleWorkspaceRoute(
 
   if (context.pathname === "/api/workspace/mapping-status" && context.method === "POST") {
     await handleWorkspaceMappingStatus(request, response);
+    return true;
+  }
+
+  if (context.pathname === "/api/workspace/mapping-contract" && context.method === "POST") {
+    await handleWorkspaceMappingContract(request, response);
     return true;
   }
 

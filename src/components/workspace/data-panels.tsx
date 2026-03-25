@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 
+import {
+  mappingEvidenceKinds,
+  type MappingEvidenceKind,
+} from "../../../shared/types";
 import type { WorkspaceLibraryAssetSearchResponse } from "../../../shared/workspace-library-assets";
 import { filterWorkspaceLibraryAssetCards } from "../../../shared/workspace-library-assets";
 import type { WorkspaceReadModel } from "../../../shared/workspace-read-model";
@@ -9,6 +13,26 @@ import { StatusPill } from "./status-pill";
 export type ReviewQueueDraft = {
   status: WorkspaceReadModel["reviewQueue"][number]["status"];
   owner: string;
+};
+
+export type MappingContractDraft = {
+  packageName: string;
+  path: string;
+  exportName: string;
+  evidenceText: string;
+};
+
+export type MappingContractInput = {
+  implementationTarget: {
+    packageName: string | null;
+    path: string;
+    exportName: string;
+  };
+  evidence: Array<{
+    kind: MappingEvidenceKind;
+    label: string;
+    href: string;
+  }>;
 };
 
 function buildReviewQueueDraft(
@@ -30,12 +54,87 @@ function isReviewQueueDraftDirty(params: {
   );
 }
 
+function buildMappingContractDraft(
+  mapping: WorkspaceReadModel["mappings"][number],
+): MappingContractDraft {
+  return {
+    packageName: mapping.implementationTarget?.packageName ?? "",
+    path: mapping.implementationTarget?.path ?? "",
+    exportName: mapping.implementationTarget?.exportName ?? "",
+    evidenceText: mapping.evidence
+      .map((item) => `${item.kind} | ${item.label} | ${item.href}`)
+      .join("\n"),
+  };
+}
+
+function isMappingContractDraftDirty(params: {
+  draft: MappingContractDraft;
+  mapping: WorkspaceReadModel["mappings"][number];
+}) {
+  const current = buildMappingContractDraft(params.mapping);
+  return (
+    params.draft.packageName.trim() !== current.packageName.trim() ||
+    params.draft.path.trim() !== current.path.trim() ||
+    params.draft.exportName.trim() !== current.exportName.trim() ||
+    params.draft.evidenceText.trim() !== current.evidenceText.trim()
+  );
+}
+
+function parseMappingEvidenceText(value: string):
+  | {
+      ok: true;
+      evidence: MappingContractInput["evidence"];
+    }
+  | {
+      ok: false;
+      error: string;
+    } {
+  const lines = value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const evidence: MappingContractInput["evidence"] = [];
+
+  for (const line of lines) {
+    const [kind, label, href, ...rest] = line.split("|").map((part) => part.trim());
+    if (rest.length > 0 || !kind || !label || !href) {
+      return {
+        ok: false,
+        error: "证据格式必须是 kind | label | href。",
+      };
+    }
+
+    if (!mappingEvidenceKinds.includes(kind as MappingEvidenceKind)) {
+      return {
+        ok: false,
+        error: `证据 kind 仅支持 ${mappingEvidenceKinds.join(", ")}。`,
+      };
+    }
+
+    evidence.push({
+      kind: kind as MappingEvidenceKind,
+      label,
+      href,
+    });
+  }
+
+  return {
+    ok: true,
+    evidence,
+  };
+}
+
 export function WorkspaceDataColumns(props: {
   workspaceModel: WorkspaceReadModel;
   isBusy: boolean;
   onUpdateMappingStatus: (
     mappingId: string,
     status: WorkspaceReadModel["mappings"][number]["status"],
+  ) => void;
+  mappingMessage: string;
+  onSaveMappingContract: (
+    mappingId: string,
+    payload: MappingContractInput,
   ) => void;
   reviewMessage: string;
   reviewDrafts: Record<string, ReviewQueueDraft>;
@@ -48,8 +147,10 @@ export function WorkspaceDataColumns(props: {
 }) {
   const {
     isBusy,
+    mappingMessage,
     onReviewDraftChange,
     onReviewSave,
+    onSaveMappingContract,
     onSubmitSyncPayload,
     onSyncPayloadChange,
     onUpdateMappingStatus,
@@ -65,6 +166,18 @@ export function WorkspaceDataColumns(props: {
   );
   const [assetSearchMessage, setAssetSearchMessage] = useState("");
   const [isAssetSearchBusy, setIsAssetSearchBusy] = useState(false);
+  const [mappingDrafts, setMappingDrafts] = useState<Record<string, MappingContractDraft>>({});
+
+  useEffect(() => {
+    setMappingDrafts((current) =>
+      Object.fromEntries(
+        workspaceModel.mappings.map((mapping) => [
+          mapping.id,
+          current[mapping.id] ?? buildMappingContractDraft(mapping),
+        ]),
+      ),
+    );
+  }, [workspaceModel.mappings]);
 
   useEffect(() => {
     const query = assetQuery.trim();
@@ -259,48 +372,171 @@ export function WorkspaceDataColumns(props: {
         </Panel>
 
         <Panel title="页面与组件映射" description="把设计页面和 React 目标组件放在同一处核对。">
+          <p className="muted-line">
+            {mappingMessage || "mapping contract 通过独立 write surface 更新 implementation target / evidence。"}
+          </p>
           <div className="stack-list">
             {workspaceModel.mappings.map((mapping) => (
-              <article className="data-card" key={mapping.id}>
-                <div className="data-card-head">
-                  <div>
-                    <h3>{mapping.designName}</h3>
-                    <p className="muted-line">{mapping.reactName}</p>
-                  </div>
-                  <select
-                    className="status-select"
-                    onChange={(event) =>
-                      onUpdateMappingStatus(
-                        mapping.id,
-                        event.target.value as typeof mapping.status,
-                      )
-                    }
-                    value={mapping.status}
-                  >
-                    <option value="planned">planned</option>
-                    <option value="prototype">prototype</option>
-                    <option value="verified">verified</option>
-                  </select>
-                </div>
-                <p>{mapping.notes}</p>
-                <div className="token-row">
-                  {mapping.props.map((item) => (
-                    <span className="token" key={`${mapping.id}-${item}`}>
-                      prop: {item}
-                    </span>
-                  ))}
-                  {mapping.states.map((item) => (
-                    <span className="token token-accent" key={`${mapping.id}-${item}`}>
-                      state: {item}
-                    </span>
-                  ))}
-                  {mapping.screenNames.map((screenName) => (
-                    <span className="token" key={`${mapping.id}-${screenName}`}>
-                      screen: {screenName}
-                    </span>
-                  ))}
-                </div>
-              </article>
+              (() => {
+                const draft = mappingDrafts[mapping.id] ?? buildMappingContractDraft(mapping);
+                const parsedEvidence = parseMappingEvidenceText(draft.evidenceText);
+                const canSave =
+                  draft.path.trim().length > 0 &&
+                  draft.exportName.trim().length > 0 &&
+                  parsedEvidence.ok &&
+                  isMappingContractDraftDirty({ draft, mapping });
+
+                return (
+                  <article className="data-card" key={mapping.id}>
+                    <div className="data-card-head">
+                      <div>
+                        <h3>{mapping.designName}</h3>
+                        <p className="muted-line">{mapping.reactName}</p>
+                      </div>
+                      <select
+                        className="status-select"
+                        onChange={(event) =>
+                          onUpdateMappingStatus(
+                            mapping.id,
+                            event.target.value as typeof mapping.status,
+                          )
+                        }
+                        value={mapping.status}
+                      >
+                        <option value="planned">planned</option>
+                        <option value="prototype">prototype</option>
+                        <option value="verified">verified</option>
+                      </select>
+                    </div>
+                    <p>{mapping.notes}</p>
+                    <p className="muted-line">
+                      {mapping.implementationTarget
+                        ? `target: ${mapping.implementationTarget.path}#${mapping.implementationTarget.exportName}${mapping.implementationTarget.packageName ? ` (${mapping.implementationTarget.packageName})` : ""}`
+                        : "当前还没有 implementation target。"}
+                    </p>
+                    <div className="token-row">
+                      {mapping.props.map((item) => (
+                        <span className="token" key={`${mapping.id}-${item}`}>
+                          prop: {item}
+                        </span>
+                      ))}
+                      {mapping.states.map((item) => (
+                        <span className="token token-accent" key={`${mapping.id}-${item}`}>
+                          state: {item}
+                        </span>
+                      ))}
+                      {mapping.screenNames.map((screenName) => (
+                        <span className="token" key={`${mapping.id}-${screenName}`}>
+                          screen: {screenName}
+                        </span>
+                      ))}
+                      {mapping.evidence.map((item) => (
+                        <span className="token" key={`${mapping.id}-${item.kind}-${item.label}`}>
+                          {item.kind}: {item.label}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="review-edit-grid">
+                      <label className="field">
+                        <span>Path</span>
+                        <input
+                          className="status-select"
+                          onChange={(event) =>
+                            setMappingDrafts((current) => ({
+                              ...current,
+                              [mapping.id]: {
+                                ...draft,
+                                path: event.target.value,
+                              },
+                            }))
+                          }
+                          type="text"
+                          value={draft.path}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Export</span>
+                        <input
+                          className="status-select"
+                          onChange={(event) =>
+                            setMappingDrafts((current) => ({
+                              ...current,
+                              [mapping.id]: {
+                                ...draft,
+                                exportName: event.target.value,
+                              },
+                            }))
+                          }
+                          type="text"
+                          value={draft.exportName}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Package</span>
+                        <input
+                          className="status-select"
+                          onChange={(event) =>
+                            setMappingDrafts((current) => ({
+                              ...current,
+                              [mapping.id]: {
+                                ...draft,
+                                packageName: event.target.value,
+                              },
+                            }))
+                          }
+                          type="text"
+                          value={draft.packageName}
+                        />
+                      </label>
+                    </div>
+                    <label className="field">
+                      <span>Evidence</span>
+                      <textarea
+                        className="code-box code-box-compact"
+                        onChange={(event) =>
+                          setMappingDrafts((current) => ({
+                            ...current,
+                            [mapping.id]: {
+                              ...draft,
+                              evidenceText: event.target.value,
+                            },
+                          }))
+                        }
+                        spellCheck={false}
+                        value={draft.evidenceText}
+                      />
+                    </label>
+                    <p className="muted-line">
+                      证据格式：`kind | label | href`，kind 支持 {mappingEvidenceKinds.join(", ")}。
+                    </p>
+                    {!parsedEvidence.ok && draft.evidenceText.trim() ? (
+                      <p className="muted-line">{parsedEvidence.error}</p>
+                    ) : null}
+                    <div className="inline-actions">
+                      <button
+                        className="button-secondary"
+                        disabled={!canSave || isBusy}
+                        onClick={() => {
+                          if (!parsedEvidence.ok) {
+                            return;
+                          }
+                          onSaveMappingContract(mapping.id, {
+                            implementationTarget: {
+                              packageName: draft.packageName.trim() || null,
+                              path: draft.path.trim(),
+                              exportName: draft.exportName.trim(),
+                            },
+                            evidence: parsedEvidence.evidence,
+                          });
+                        }}
+                        type="button"
+                      >
+                        保存 mapping contract
+                      </button>
+                    </div>
+                  </article>
+                );
+              })()
             ))}
           </div>
         </Panel>
