@@ -8,6 +8,9 @@ export type PluginNodeSummary = {
   fillable: boolean;
   fills: string[];
   fillStyleId: string | null;
+  styleBindings?: PluginNodeStyleBindings;
+  boundVariableIds?: string[];
+  variableBindings?: PluginNodeVariableBindings;
   x?: number | null;
   y?: number | null;
   absoluteX?: number | null;
@@ -22,6 +25,16 @@ export type PluginNodeSummary = {
   previewDataUrl?: string | null;
   hasImageFill?: boolean;
 };
+
+export type PluginNodeStyleBindings = {
+  fillStyleId: string | null;
+  strokeStyleId: string | null;
+  textStyleId: string | null;
+  effectStyleId: string | null;
+  gridStyleId: string | null;
+};
+
+export type PluginNodeVariableBindings = Record<string, string[]>;
 
 export type PluginNodeInspection = PluginNodeSummary & {
   depth: number;
@@ -79,6 +92,52 @@ export type PluginImageArtifact = {
   source: "image-fill-original" | "node-export";
 };
 
+export type PluginVariableCollectionMode = {
+  modeId: string;
+  name: string;
+};
+
+export type PluginVariableCollectionSummary = {
+  id: string;
+  name: string;
+  defaultModeId: string;
+  hiddenFromPublishing: boolean;
+  modes: PluginVariableCollectionMode[];
+};
+
+export type PluginVariableValueKind =
+  | "color"
+  | "number"
+  | "string"
+  | "boolean"
+  | "alias"
+  | "unknown";
+
+export type PluginVariableModeValue = {
+  modeId: string;
+  modeName: string | null;
+  kind: PluginVariableValueKind;
+  value: string | number | boolean | null;
+};
+
+export type PluginVariableDefinition = {
+  id: string;
+  name: string;
+  collectionId: string;
+  collectionName: string;
+  resolvedType: "COLOR" | "FLOAT" | "STRING" | "BOOLEAN";
+  hiddenFromPublishing: boolean;
+  scopes: string[];
+  valuesByMode: PluginVariableModeValue[];
+};
+
+export type PluginStyleDefinition = {
+  id: string;
+  styleType: "paint" | "text" | "effect" | "grid";
+  name: string;
+  description: string | null;
+};
+
 export type PluginRuntimeFeatures = {
   supportsExplicitNodeTargeting: boolean;
 };
@@ -96,6 +155,11 @@ export type PluginBridgeSession = {
   runtimeFeatures: PluginRuntimeFeatures;
   capabilities: PluginCapabilityDescriptor[];
   selection: PluginNodeSummary[];
+  hasStyleSnapshot?: boolean;
+  styles?: PluginStyleDefinition[];
+  hasVariableSnapshot?: boolean;
+  variableCollections?: PluginVariableCollectionSummary[];
+  variables?: PluginVariableDefinition[];
 };
 
 export type PluginBridgeCommandStatus =
@@ -132,6 +196,11 @@ export type PluginSessionRegistrationPayload = {
   runtimeFeatures: PluginRuntimeFeatures;
   capabilities: PluginCapabilityDescriptor[];
   selection: PluginNodeSummary[];
+  hasStyleSnapshot?: boolean;
+  styles?: PluginStyleDefinition[];
+  hasVariableSnapshot?: boolean;
+  variableCollections?: PluginVariableCollectionSummary[];
+  variables?: PluginVariableDefinition[];
 };
 
 export type QueuePluginCommandPayload = {

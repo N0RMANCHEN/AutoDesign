@@ -71,6 +71,7 @@
 - [reconstruction-workflow-hardening.md](reconstruction-workflow-hardening.md)
 - [testing-and-acceptance-hardening.md](testing-and-acceptance-hardening.md)
 - [workspace-context-pack-hardening.md](workspace-context-pack-hardening.md)
+- [figma-mcp-alignment.md](figma-mcp-alignment.md)
 
 ## Future / Background
 

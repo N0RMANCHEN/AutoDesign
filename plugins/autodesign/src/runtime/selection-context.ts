@@ -2,6 +2,8 @@ import type {
   PluginImageArtifact,
   PluginNodeInspection,
   PluginNodeSummary,
+  PluginNodeStyleBindings,
+  PluginNodeVariableBindings,
 } from "../../../../shared/plugin-bridge.js";
 
 const FILL_CAPABLE_TYPES = new Set([
@@ -118,17 +120,73 @@ export function clonePaints(paints: any[]) {
   return paints.map((paint) => Object.assign({}, paint));
 }
 
+function uniqueSortedStrings(values: string[]) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].sort();
+}
+
 export function getBoundFillVariableIds(node: any) {
   const fills = "boundVariables" in node ? node.boundVariables && node.boundVariables.fills : null;
   if (!Array.isArray(fills)) {
     return [];
   }
 
-  return fills
+  return uniqueSortedStrings(
+    fills
     .map((entry: any) =>
       entry && typeof entry.id === "string" ? entry.id : null,
     )
-    .filter((value: string | null): value is string => Boolean(value));
+    .filter((value: string | null): value is string => Boolean(value)),
+  );
+}
+
+function readStyleId(node: any, key: string) {
+  return typeof node?.[key] === "string" && node[key] ? node[key] : null;
+}
+
+function readStyleBindings(node: any): PluginNodeStyleBindings {
+  return {
+    fillStyleId: supportsFills(node) ? readStyleId(node, "fillStyleId") : null,
+    strokeStyleId: supportsStrokes(node) ? readStyleId(node, "strokeStyleId") : null,
+    textStyleId: readStyleId(node, "textStyleId"),
+    effectStyleId: readStyleId(node, "effectStyleId"),
+    gridStyleId: readStyleId(node, "gridStyleId"),
+  };
+}
+
+function collectVariableIdsFromBindingValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectVariableIdsFromBindingValue(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const directId = typeof record.id === "string" ? [record.id] : [];
+  return [
+    ...directId,
+    ...Object.entries(record)
+      .filter(([key]) => key !== "id")
+      .flatMap(([, entry]) => collectVariableIdsFromBindingValue(entry)),
+  ];
+}
+
+function readVariableBindings(node: any): PluginNodeVariableBindings {
+  if (!node || !("boundVariables" in node) || !node.boundVariables || typeof node.boundVariables !== "object") {
+    return {};
+  }
+
+  const entries = Object.entries(node.boundVariables as Record<string, unknown>)
+    .map(([key, value]) => [key, uniqueSortedStrings(collectVariableIdsFromBindingValue(value))] as const)
+    .filter(([, ids]) => ids.length > 0)
+    .sort((left, right) => left[0].localeCompare(right[0]));
+
+  return Object.fromEntries(entries);
+}
+
+function readBoundVariableIds(variableBindings: PluginNodeVariableBindings) {
+  return uniqueSortedStrings(Object.values(variableBindings).flat());
 }
 
 export function nodeFillSummary(node: any) {
@@ -194,13 +252,18 @@ function readLayoutPositioning(node: any) {
 export function nodeSummary(node: any): PluginNodeSummary {
   const parent = getParentNode(node);
   const absolutePosition = getAbsolutePosition(node);
+  const styleBindings = readStyleBindings(node);
+  const variableBindings = readVariableBindings(node);
   return {
     id: node.id,
     name: node.name,
     type: node.type,
     fillable: supportsFills(node),
     fills: nodeFillSummary(node),
-    fillStyleId: supportsFills(node) ? node.fillStyleId || null : null,
+    fillStyleId: styleBindings.fillStyleId,
+    styleBindings,
+    boundVariableIds: readBoundVariableIds(variableBindings),
+    variableBindings,
     x: typeof node.x === "number" ? node.x : null,
     y: typeof node.y === "number" ? node.y : null,
     absoluteX: absolutePosition ? absolutePosition.x : null,
@@ -394,10 +457,7 @@ export function inspectNodeSubtree(root: any, options?: { maxDepth?: number }) {
       opacity: readOpacity(node),
       rotation: readRotation(node),
       strokes: strokeSummary(node),
-      strokeStyleId:
-        supportsStrokes(node) && typeof node.strokeStyleId === "string" && node.strokeStyleId
-          ? node.strokeStyleId
-          : null,
+      strokeStyleId: summary.styleBindings?.strokeStyleId ?? null,
       cornerRadius: readCornerRadius(node),
       clipsContent: readBooleanProperty(node, "clipsContent"),
       isMask: readBooleanProperty(node, "isMask"),

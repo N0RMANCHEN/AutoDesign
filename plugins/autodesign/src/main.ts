@@ -9,6 +9,8 @@ import {
   getRuntimeFeatures,
 } from "./runtime/capability-runner.js";
 import { currentSelectionUiPayload } from "./runtime/selection-context.js";
+import { readLocalStyleSnapshot } from "./runtime/style-snapshot.js";
+import { readLocalVariableSnapshot } from "./runtime/variable-snapshot.js";
 
 const PLUGIN_LABEL = "AutoDesign";
 const PLUGIN_VERSION = "0.2.3";
@@ -111,6 +113,24 @@ function postCommandResult(
 }
 
 async function sessionPayload(): Promise<PluginSessionRegistrationPayload> {
+  const [styleSnapshot, variableSnapshot] = await Promise.all([
+    readLocalStyleSnapshot().catch((error) => {
+      postExecutionError(describeError(error, "Style snapshot failed."));
+      return {
+        hasStyleSnapshot: false,
+        styles: [],
+      };
+    }),
+    readLocalVariableSnapshot().catch((error) => {
+      postExecutionError(describeError(error, "Variable snapshot failed."));
+      return {
+        hasVariableSnapshot: false,
+        variableCollections: [],
+        variables: [],
+      };
+    }),
+  ]);
+
   return {
     sessionId: pluginSessionId || undefined,
     label: PLUGIN_LABEL,
@@ -121,6 +141,8 @@ async function sessionPayload(): Promise<PluginSessionRegistrationPayload> {
     runtimeFeatures: getRuntimeFeatures(),
     capabilities: getRuntimeCapabilities(),
     selection: await readSelectionSummary(),
+    ...styleSnapshot,
+    ...variableSnapshot,
   };
 }
 

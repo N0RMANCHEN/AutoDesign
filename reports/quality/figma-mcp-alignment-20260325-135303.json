@@ -1,0 +1,37 @@
+{
+  "kind": "quality_report",
+  "timestamp": "20260325-135303",
+  "scope": "Assess which official Figma MCP capabilities align with AutoDesign's product vision and should enter the active roadmap.",
+  "owner": "Codex",
+  "inputs": [
+    "https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server",
+    "https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/",
+    "https://developers.figma.com/docs/figma-mcp-server/write-to-canvas/",
+    "README.md",
+    "AGENT.md",
+    "doc/Product-Standards.md",
+    "doc/Roadmap.md",
+    "doc/Capability-Catalog.md",
+    "shared/plugin-capabilities.ts"
+  ],
+  "measurements": [
+    "Reviewed 16 official MCP tool families plus the high-level capability overview on March 25, 2026.",
+    "8 capability families align directly with the product vision.",
+    "2 capability families are only weakly aligned and should remain downgraded or deferred.",
+    "6 capability families should stay out of the current active roadmap."
+  ],
+  "findings": [
+    "The aligned scope is the local equivalent of design-context extraction, variable and metadata reads, screenshot capture, design-system mapping, and a safe subset of use_figma write operations.",
+    "Remote hosted MCP, whoami, FigJam, Make resources, code-to-canvas, and blank-file provisioning are not current product-line priorities.",
+    "The current gap is capability-surface completeness, not the absence of the MCP label."
+  ],
+  "artifacts": [
+    "reports/quality/figma-mcp-alignment-20260325-135303.md",
+    "doc/plans/figma-mcp-alignment.md",
+    "doc/Roadmap.md"
+  ],
+  "follow_up": [
+    "Promote the aligned subset into a dedicated active roadmap item.",
+    "Implement the work in phased order: read/context parity, design-system parity, then safe write parity."
+  ]
+}

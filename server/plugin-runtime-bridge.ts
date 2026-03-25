@@ -43,6 +43,15 @@ function collectInspectedNodes(command: PluginBridgeCommandRecord) {
   return command.results.flatMap((result) => result.inspectedNodes || []) as PluginNodeInspection[];
 }
 
+export function isReconstructionGeneratedInspectionNode(node: PluginNodeInspection) {
+  return (
+    node.generatedBy === "reconstruction" ||
+    node.name.startsWith("AD Vector/") ||
+    node.name.startsWith("AD Hybrid/") ||
+    node.name.startsWith("AD Rebuild/")
+  );
+}
+
 function isOnlineSession(session: PluginBridgeSession | null) {
   return Boolean(session && session.status === "online");
 }
@@ -175,9 +184,9 @@ export async function exportSingleNodeImage(
   return artifact;
 }
 
-export async function inspectFrameSubtree(
+export async function inspectNodeSubtree(
   targetSessionId: string,
-  frameNodeId: string,
+  nodeId: string,
   options?: { maxDepth?: number },
 ) {
   const command = await queueAndWaitForPluginBatch(targetSessionId, [
@@ -185,13 +194,21 @@ export async function inspectFrameSubtree(
       type: "capability",
       capabilityId: "nodes.inspect-subtree",
       payload: {
-        nodeId: frameNodeId,
+        nodeId,
         ...(Number.isFinite(options?.maxDepth) ? { maxDepth: options?.maxDepth } : {}),
       },
       executionMode: "strict",
     },
   ]);
 
-  assertSuccessfulCommandRecord(command, "Frame inspect");
+  assertSuccessfulCommandRecord(command, "Node inspect");
   return collectInspectedNodes(command);
+}
+
+export async function inspectFrameSubtree(
+  targetSessionId: string,
+  frameNodeId: string,
+  options?: { maxDepth?: number },
+) {
+  return inspectNodeSubtree(targetSessionId, frameNodeId, options);
 }

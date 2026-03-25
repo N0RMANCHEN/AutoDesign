@@ -9,6 +9,31 @@
 - `Fixed`：缺陷修复
 - `Removed`：废弃或删除的内容
 
+## 2026-03-25
+
+### Added
+
+- 新增 [shared/runtime-variable-defs.ts](shared/runtime-variable-defs.ts) 与 [shared/runtime-variable-defs.test.ts](shared/runtime-variable-defs.test.ts)，把 `variable defs` 的 live/local snapshot 归一化逻辑从 `design-context` 组合层拆成独立 contract
+- 新增 [plugins/autodesign/src/runtime/variable-snapshot.ts](plugins/autodesign/src/runtime/variable-snapshot.ts) 与 [plugins/autodesign/src/runtime/variable-snapshot.test.ts](plugins/autodesign/src/runtime/variable-snapshot.test.ts)，由插件在 session register/heartbeat 时上报本地 variable collections、modes 和 variable values
+
+### Changed
+
+- [shared/plugin-bridge.ts](shared/plugin-bridge.ts) 与 [server/plugin-bridge-store.ts](server/plugin-bridge-store.ts) 扩展了 plugin session 协议，bridge 现在会保留或显式清空 variable snapshot，而不会再把“旧插件未上报”和“当前文件没有变量”混为一谈
+- [server/routes/runtime-read-routes.ts](server/routes/runtime-read-routes.ts) 的 `POST /api/runtime/variable-defs` 与 `POST /api/runtime/design-context` 新增可选 `targetSessionId`，显式定向到 plugin session 时可返回 live local variable truth；未提供 session 时继续返回显式 gap marker
+- [server/api-routes.test.ts](server/api-routes.test.ts)、[server/plugin-bridge-store.test.ts](server/plugin-bridge-store.test.ts) 和 [shared/runtime-design-context.test.ts](shared/runtime-design-context.test.ts) 补齐了 live variable snapshot、fallback gap marker 和 heartbeat 保留/清空语义的回归
+- [shared/plugin-bridge.ts](shared/plugin-bridge.ts)、[plugins/autodesign/src/runtime/selection-context.ts](plugins/autodesign/src/runtime/selection-context.ts) 和 [shared/runtime-node-metadata.ts](shared/runtime-node-metadata.ts) 现在会在节点摘要里暴露 `styleBindings`、`boundVariableIds` 和 `variableBindings`，把 style / variable binding truth 接入 `node-metadata` 读层
+- [plugins/autodesign/src/runtime/style-snapshot.ts](plugins/autodesign/src/runtime/style-snapshot.ts)、[plugins/autodesign/src/main.ts](plugins/autodesign/src/main.ts) 和 [shared/runtime-node-metadata.ts](shared/runtime-node-metadata.ts) 现在还会把 local style definitions 随 plugin session 上报，并在 `node-metadata` 里把 style ids / variable ids 解析成可解释的 resolved truth
+- [shared/runtime-node-metadata.ts](shared/runtime-node-metadata.ts) 与 [server/api-routes.test.ts](server/api-routes.test.ts) 现在还会返回子树级 `resolved/unresolved` style / variable dependency pack，让 workspace 和 Figma-to-React 不必再重复扫描 subtree 才能拿到依赖真相
+- [shared/runtime-design-context.ts](shared/runtime-design-context.ts) 与 [server/api-routes.test.ts](server/api-routes.test.ts) 现在会在 `design-context` 里直接附带 cached plugin selection 的 dependency truth，减少 workspace 对 `node-metadata` 细节拼装的依赖
+- [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 的 Runtime AI 测试台现在会先生成并展示 `design-context`，再复用其中的 `contextPack` 跑本地 action，workspace UI 对 bridge/session 细节的直连进一步收口
+- [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 现在还会在 selection / action / session 改变后把旧的 `design-context` 标成 stale，并阻止继续用过期 `contextPack` 运行 action
+- [runtime-panels.tsx](src/components/workspace/runtime-panels.tsx) 从 [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 中拆出了 Runtime 相关 panel，避免 workspace 主壳重新长成新的架构热点
+- [runtime-bridge-overview.ts](shared/runtime-bridge-overview.ts)、[runtime-read-routes.ts](server/routes/runtime-read-routes.ts) 和 [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 新增了专用 `bridge-overview` read model，workspace 不再直接消费原始 `/api/plugin-bridge` snapshot
+- 新增 [runtime-bridge-dispatch.ts](shared/runtime-bridge-dispatch.ts)、[runtime-write-routes.ts](server/routes/runtime-write-routes.ts) 和 [bridge-panels.tsx](src/components/workspace/bridge-panels.tsx)，workspace 现在通过 `POST /api/runtime/bridge-dispatch` 获取窄化后的 dispatch receipt，桥接协议 panel / 状态 panel 也从 [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 中继续拆出，进一步收紧对原始 bridge command record 的耦合
+- 新增 [workspace-read-model.ts](shared/workspace-read-model.ts)、[workspace-read-model.test.ts](shared/workspace-read-model.test.ts) 和 [workspace-routes.ts](server/routes/workspace-routes.ts) 的 workspace read/write contract；workspace 的 design source、mapping、review queue 和默认 selection 现在通过 `/api/workspace/read-model` 读取，`mapping-status`、`figma-sync`、`reset` 也改走窄化 write surface，而不是直接消费 `/api/project`
+- [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 现在会把 `design-context` 的 stale key 绑定到 `workspace.updatedAt`，避免 sync / reset / mapping status 更新后继续误用旧 context snapshot
+- [workspace-read-model.ts](shared/workspace-read-model.ts)、[workspace-routes.ts](server/routes/workspace-routes.ts) 和 [workspace-shell.tsx](src/components/workspace/workspace-shell.tsx) 现在还补上了 review queue 的窄写面：`POST /api/workspace/review-queue-item` 只接收 `status / owner` 更新并返回 narrowed receipt，workspace UI 不再需要理解原始 `ReviewItem` 才能推进评审流
+
 ## 2026-03-23
 
 ### Added

@@ -2,15 +2,22 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { ReconstructionJobSnapshot } from "../../shared/reconstruction.js";
-
-const dataDirectory = path.join(process.cwd(), "data");
-const reconstructionFile = path.join(dataDirectory, "autodesign-reconstruction-jobs.json");
+import { resolveDataDirectory } from "../runtime-paths.js";
 
 const emptySnapshot: ReconstructionJobSnapshot = {
   jobs: [],
 };
 
+function resolveReconstructionPaths() {
+  const dataDirectory = resolveDataDirectory();
+  return {
+    dataDirectory,
+    reconstructionFile: path.join(dataDirectory, "autodesign-reconstruction-jobs.json"),
+  };
+}
+
 async function ensureReconstructionFile() {
+  const { dataDirectory, reconstructionFile } = resolveReconstructionPaths();
   await mkdir(dataDirectory, { recursive: true });
 
   try {
@@ -22,6 +29,7 @@ async function ensureReconstructionFile() {
 
 export async function readReconstructionJobSnapshot(): Promise<ReconstructionJobSnapshot> {
   await ensureReconstructionFile();
+  const { reconstructionFile } = resolveReconstructionPaths();
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -42,6 +50,7 @@ export async function readReconstructionJobSnapshot(): Promise<ReconstructionJob
 
 export async function writeReconstructionJobSnapshot(snapshot: ReconstructionJobSnapshot) {
   await ensureReconstructionFile();
+  const { reconstructionFile } = resolveReconstructionPaths();
   const tempFile = `${reconstructionFile}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tempFile, JSON.stringify(snapshot, null, 2), "utf8");
   await rename(tempFile, reconstructionFile);

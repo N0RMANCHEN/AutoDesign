@@ -3,323 +3,23 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildContextPack } from "../shared/context-pack.js";
-import type {
-  InspectFrameRequestPayload,
-  InspectFrameResponsePayload,
-  PluginCommandResultPayload,
-  PluginNodeInspection,
-  PluginSessionRegistrationPayload,
-  QueuePluginCommandPayload,
-} from "../shared/plugin-bridge.js";
-import type { CreateReconstructionJobPayload } from "../shared/reconstruction.js";
-import { runRuntimeAction } from "../shared/runtime-actions.js";
-import type {
-  ContextPack,
-  FigmaSyncPayload,
-  GraphKind,
-  ProjectData,
-  RuntimeAction,
-} from "../shared/types.js";
-import { nowIso, slugify } from "../shared/utils.js";
+import { sendJson, sendText } from "./http-utils.js";
 import {
-  claimNextPluginCommand,
-  completePluginCommand,
-  getPluginBridgeSnapshot,
-  heartbeatPluginSession,
-  queuePluginCommand,
-  registerPluginSession,
-} from "./plugin-bridge-store.js";
-import { sendJson, sendText, readBody } from "./http-utils.js";
-import {
-  collectChangedNodeIds,
-  exportSingleNodeImage,
-  findSessionById,
-  inspectFrameSubtree,
-  requireLoopCompatibleSession,
-} from "./plugin-runtime-bridge.js";
-import {
-  assertSuccessfulCommandRecord,
-  buildAutoRefineCommands,
-  buildStructureReport,
-  createReconstructionJobFromSelection,
-  ensureHybridReference,
-  ensureRasterReference,
-  ensureVectorReference,
-  isHybridReconstructionJob,
-  isRasterExactJob,
-  isVectorReconstructionJob,
-  normalizeRebuildCommands,
-  queueAndWaitForPluginBatch,
-  resolveReferencePreviewForMeasurement,
-  resolveLoopStopReason,
-  uniqueStrings,
+  createDefaultReconstructionExecutionDeps,
 } from "./reconstruction-server-runtime.js";
+import { tryHandlePluginBridgeRoute } from "./routes/plugin-bridge-routes.js";
 import { tryHandleReconstructionDesignRoute } from "./routes/reconstruction-design-routes.js";
 import { tryHandleReconstructionExecutionRoute } from "./routes/reconstruction-execution-routes.js";
-import { readProject, resetProject, writeProject } from "./storage.js";
+import type { RequestContext } from "./routes/request-context.js";
+import { tryHandleRuntimeReadRoute } from "./routes/runtime-read-routes.js";
+import { tryHandleRuntimeWriteRoute } from "./routes/runtime-write-routes.js";
+import { tryHandleWorkspaceRoute } from "./routes/workspace-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDirectory = path.resolve(__dirname, "..");
 const distDirectory = path.join(rootDirectory, "dist");
 const port = Number(process.env.PORT ?? 3001);
-
-type RequestContext = {
-  pathname: string;
-  method: string;
-};
-
-async function handleProjectGet(response: import("node:http").ServerResponse) {
-  const project = await readProject();
-  sendJson(response, 200, project);
-}
-
-async function handleProjectPut(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const body = await readBody<ProjectData>(request);
-  const saved = await writeProject(body);
-  sendJson(response, 200, saved);
-}
-
-async function handleProjectReset(response: import("node:http").ServerResponse) {
-  const project = await resetProject();
-  sendJson(response, 200, project);
-}
-
-async function handleFigmaSync(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const body = await readBody<FigmaSyncPayload>(request);
-  const project = await readProject();
-
-  const sourceId = `source-${slugify(body.source.name)}`;
-  const syncedAt = nowIso();
-
-  const nextSources = project.designSources.filter((item) => item.id !== sourceId);
-  nextSources.unshift({
-    id: sourceId,
-    name: body.source.name,
-    figmaFileKey: body.source.figmaFileKey,
-    branch: body.source.branch,
-    status: "connected",
-    lastSyncedAt: syncedAt,
-    summary: body.source.summary,
-  });
-
-  const nextScreens = project.designScreens.filter((screen) => screen.sourceId !== sourceId);
-  const nextMappings = [...project.componentMappings];
-
-  body.screens.forEach((screen) => {
-    nextScreens.push({
-      id: `screen-${slugify(screen.name)}`,
-      sourceId,
-      name: screen.name,
-      purpose: screen.purpose,
-      stateNotes: screen.stateNotes,
-      summary: screen.summary,
-    });
-  });
-
-  body.components.forEach((component) => {
-    const mappingId = `mapping-${slugify(component.designName)}`;
-    const existing = nextMappings.find((item) => item.id === mappingId);
-
-    if (existing) {
-      existing.designName = component.designName;
-      existing.reactName = component.reactName;
-      existing.props = component.props;
-      existing.states = component.states;
-      existing.notes = component.notes;
-      existing.status = "prototype";
-    } else {
-      nextMappings.push({
-        id: mappingId,
-        designName: component.designName,
-        reactName: component.reactName,
-        props: component.props,
-        states: component.states,
-        notes: component.notes,
-        status: "prototype",
-        screenIds: [],
-      });
-    }
-  });
-
-  const saved = await writeProject({
-    ...project,
-    designSources: nextSources,
-    designScreens: nextScreens,
-    componentMappings: nextMappings,
-  });
-
-  sendJson(response, 200, saved);
-}
-
-async function handleContextPack(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const body = await readBody<{
-    selectionIds?: string[];
-    graphKind?: GraphKind;
-    action?: RuntimeAction;
-  }>(request);
-  const project = await readProject();
-  const contextPack = buildContextPack({
-    project,
-    selectionIds: body.selectionIds ?? [],
-    graphKind: body.graphKind ?? "codegraph",
-    action: body.action ?? "codegraph/summarize",
-  });
-  sendJson(response, 200, contextPack);
-}
-
-async function handleRuntimeRun(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const contextPack = await readBody<ContextPack>(request);
-  const result = runRuntimeAction(contextPack);
-  sendJson(response, 200, result);
-}
-
-async function handlePluginBridgeSnapshot(response: import("node:http").ServerResponse) {
-  const snapshot = await getPluginBridgeSnapshot();
-  sendJson(response, 200, snapshot);
-}
-
-async function handlePluginSessionRegister(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const payload = await readBody<PluginSessionRegistrationPayload>(request);
-  const session = await registerPluginSession(payload);
-  sendJson(response, 200, session);
-}
-
-async function handlePluginSessionHeartbeat(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-  sessionId: string,
-) {
-  const payload = await readBody<PluginSessionRegistrationPayload>(request);
-  const session = await heartbeatPluginSession(sessionId, payload);
-
-  if (!session) {
-    sendJson(response, 404, { ok: false, error: "Plugin session not found" });
-    return;
-  }
-
-  sendJson(response, 200, session);
-}
-
-async function handlePluginCommandQueue(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const payload = await readBody<QueuePluginCommandPayload>(request);
-  const record = await queuePluginCommand(payload);
-  sendJson(response, 200, record);
-}
-
-async function handlePluginCommandClaim(
-  response: import("node:http").ServerResponse,
-  sessionId: string,
-) {
-  const command = await claimNextPluginCommand(sessionId);
-  sendJson(response, 200, { command });
-}
-
-async function handlePluginCommandResult(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-  commandId: string,
-) {
-  const payload = await readBody<PluginCommandResultPayload>(request);
-  const result = await completePluginCommand(commandId, payload);
-
-  if (!result) {
-    sendJson(response, 404, { ok: false, error: "Plugin command not found" });
-    return;
-  }
-
-  sendJson(response, 200, result);
-}
-
-function isReconstructionGeneratedInspectionNode(node: PluginNodeInspection) {
-  return (
-    node.generatedBy === "reconstruction" ||
-    node.name.startsWith("AD Vector/") ||
-    node.name.startsWith("AD Hybrid/") ||
-    node.name.startsWith("AD Rebuild/")
-  );
-}
-
-async function handleInspectFrame(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const payload = await readBody<InspectFrameRequestPayload>(request);
-  if (!payload.targetSessionId || !payload.frameNodeId) {
-    sendJson(response, 400, { ok: false, error: "targetSessionId 和 frameNodeId 必填" });
-    return;
-  }
-
-  try {
-    const nodes = await inspectFrameSubtree(payload.targetSessionId, payload.frameNodeId, {
-      maxDepth: payload.maxDepth,
-    });
-    const preview = payload.includePreview === false
-      ? null
-      : await exportSingleNodeImage(payload.targetSessionId, payload.frameNodeId, {
-          constraint: { type: "WIDTH", value: 320 },
-        });
-    const result: InspectFrameResponsePayload = {
-      sessionId: payload.targetSessionId,
-      frameNodeId: payload.frameNodeId,
-      nodes,
-      preview,
-    };
-    sendJson(response, 200, result);
-  } catch (error) {
-    sendJson(response, 500, {
-      ok: false,
-      error: error instanceof Error ? error.message : "Frame inspect failed",
-    });
-  }
-}
-
-async function handleReconstructionJobCreate(
-  request: import("node:http").IncomingMessage,
-  response: import("node:http").ServerResponse,
-) {
-  const payload = await readBody<CreateReconstructionJobPayload>(request);
-  if (!payload.targetSessionId) {
-    sendJson(response, 400, { ok: false, error: "targetSessionId is required" });
-    return;
-  }
-
-  const snapshot = await getPluginBridgeSnapshot();
-  const session = findSessionById(snapshot.sessions, payload.targetSessionId);
-  if (!session) {
-    sendJson(response, 404, { ok: false, error: "Plugin session not found" });
-    return;
-  }
-
-  try {
-    const job = await createReconstructionJobFromSelection(session, payload);
-    sendJson(response, 200, job);
-  } catch (error) {
-    sendJson(response, 400, {
-      ok: false,
-      error: error instanceof Error ? error.message : "Invalid reconstruction input",
-    });
-  }
-}
 
 async function serveStaticAsset(
   response: import("node:http").ServerResponse,
@@ -373,8 +73,6 @@ async function routeRequest(
   response: import("node:http").ServerResponse,
   context: RequestContext,
 ) {
-  const pathSegments = context.pathname.split("/").filter(Boolean);
-
   if (context.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
@@ -394,95 +92,19 @@ async function routeRequest(
     return;
   }
 
-  if (context.pathname === "/api/project" && context.method === "GET") {
-    await handleProjectGet(response);
+  if (await tryHandleWorkspaceRoute(request, response, context)) {
     return;
   }
 
-  if (context.pathname === "/api/project" && context.method === "PUT") {
-    await handleProjectPut(request, response);
+  if (await tryHandleRuntimeReadRoute(request, response, context)) {
     return;
   }
 
-  if (context.pathname === "/api/project/reset" && context.method === "POST") {
-    await handleProjectReset(response);
+  if (await tryHandleRuntimeWriteRoute(request, response, context)) {
     return;
   }
 
-  if (context.pathname === "/api/figma/sync" && context.method === "POST") {
-    await handleFigmaSync(request, response);
-    return;
-  }
-
-  if (context.pathname === "/api/runtime/context-pack" && context.method === "POST") {
-    await handleContextPack(request, response);
-    return;
-  }
-
-  if (context.pathname === "/api/runtime/run" && context.method === "POST") {
-    await handleRuntimeRun(request, response);
-    return;
-  }
-
-  if (context.pathname === "/api/plugin-bridge" && context.method === "GET") {
-    await handlePluginBridgeSnapshot(response);
-    return;
-  }
-
-  if (context.pathname === "/api/plugin-bridge/sessions/register" && context.method === "POST") {
-    await handlePluginSessionRegister(request, response);
-    return;
-  }
-
-  if (
-    pathSegments.length === 5 &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "plugin-bridge" &&
-    pathSegments[2] === "sessions" &&
-    pathSegments[4] === "heartbeat" &&
-    context.method === "POST"
-  ) {
-    await handlePluginSessionHeartbeat(request, response, pathSegments[3]);
-    return;
-  }
-
-  if (context.pathname === "/api/plugin-bridge/commands" && context.method === "POST") {
-    await handlePluginCommandQueue(request, response);
-    return;
-  }
-
-  if (context.pathname === "/api/plugin-bridge/inspect-frame" && context.method === "POST") {
-    await handleInspectFrame(request, response);
-    return;
-  }
-
-  if (context.pathname === "/api/reconstruction/jobs" && context.method === "POST") {
-    await handleReconstructionJobCreate(request, response);
-    return;
-  }
-
-  if (
-    pathSegments.length === 6 &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "plugin-bridge" &&
-    pathSegments[2] === "sessions" &&
-    pathSegments[4] === "commands" &&
-    pathSegments[5] === "next" &&
-    context.method === "GET"
-  ) {
-    await handlePluginCommandClaim(response, pathSegments[3]);
-    return;
-  }
-
-  if (
-    pathSegments.length === 5 &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "plugin-bridge" &&
-    pathSegments[2] === "commands" &&
-    pathSegments[4] === "result" &&
-    context.method === "POST"
-  ) {
-    await handlePluginCommandResult(request, response, pathSegments[3]);
+  if (await tryHandlePluginBridgeRoute(request, response, context)) {
     return;
   }
 
@@ -490,29 +112,7 @@ async function routeRequest(
     return;
   }
 
-  if (
-    await tryHandleReconstructionExecutionRoute(response, context, {
-      isRasterExactJob,
-      isVectorReconstructionJob,
-      isHybridReconstructionJob,
-      ensureRasterReference,
-      ensureVectorReference,
-      ensureHybridReference,
-      queueAndWaitForPluginBatch,
-      normalizeRebuildCommands,
-      assertSuccessfulCommandRecord,
-      collectChangedNodeIds,
-      uniqueStrings,
-      inspectFrameSubtree,
-      isReconstructionGeneratedInspectionNode,
-      exportSingleNodeImage,
-      resolveReferencePreviewForMeasurement,
-      buildStructureReport,
-      requireLoopCompatibleSession,
-      resolveLoopStopReason,
-      buildAutoRefineCommands,
-    })
-  ) {
+  if (await tryHandleReconstructionExecutionRoute(response, context, createDefaultReconstructionExecutionDeps())) {
     return;
   }
 
@@ -526,7 +126,10 @@ async function routeRequest(
   }
 }
 
-const server = createServer(async (request, response) => {
+export async function handleAutoDesignRequest(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
     await routeRequest(request, response, {
@@ -539,8 +142,24 @@ const server = createServer(async (request, response) => {
       error: error instanceof Error ? error.message : "Unknown server error",
     });
   }
-});
+}
 
-server.listen(port, () => {
-  console.log(`AutoDesign API listening on http://localhost:${port}`);
-});
+export function createAutoDesignServer() {
+  return createServer(handleAutoDesignRequest);
+}
+
+export function startAutoDesignServer(listenPort = port) {
+  const server = createAutoDesignServer();
+  server.listen(listenPort, () => {
+    console.log(`AutoDesign API listening on http://localhost:${listenPort}`);
+  });
+  return server;
+}
+
+const isMainModule =
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]) === __filename;
+
+if (isMainModule) {
+  startAutoDesignServer();
+}

@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 
 import type { ReconstructionJob } from "../../shared/reconstruction.js";
-import { failReconstructionJob, getReconstructionJob } from "../reconstruction-store.js";
+import { failReconstructionJob } from "../reconstruction-store.js";
 import {
   analyzeReconstructionJob,
   applyReconstructionJob,
@@ -14,42 +14,13 @@ import {
   renderReconstructionJob,
 } from "../reconstruction-execution-service.js";
 import { sendJson } from "../http-utils.js";
-
-type RequestContext = {
-  pathname: string;
-  method: string;
-};
-
-function isReconstructionJobActionRoute(
-  pathSegments: string[],
-  context: RequestContext,
-  action: string,
-) {
-  return (
-    pathSegments.length === 5 &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "reconstruction" &&
-    pathSegments[2] === "jobs" &&
-    pathSegments[4] === action &&
-    context.method === "POST"
-  );
-}
-
-function sendJobNotFound(response: ServerResponse) {
-  sendJson(response, 404, { ok: false, error: "Reconstruction job not found" });
-}
-
-async function getReconstructionJobOrRespond(
-  response: ServerResponse,
-  jobId: string,
-) {
-  const job = await getReconstructionJob(jobId);
-  if (!job) {
-    sendJobNotFound(response);
-    return null;
-  }
-  return job;
-}
+import type { RequestContext } from "./request-context.js";
+import {
+  getReconstructionJobOrRespond,
+  getReconstructionRoutePathSegments,
+  isReconstructionJobChildRoute,
+  sendReconstructionJobNotFound,
+} from "./reconstruction-route-helpers.js";
 
 async function sendFailedReconstructionJob(
   response: ServerResponse,
@@ -60,7 +31,7 @@ async function sendFailedReconstructionJob(
 ) {
   const failed = await failReconstructionJob(jobId, stageId, detail);
   if (!failed) {
-    sendJobNotFound(response);
+    sendReconstructionJobNotFound(response);
     return;
   }
   sendJson(response, statusCode, {
@@ -136,57 +107,57 @@ export async function tryHandleReconstructionExecutionRoute(
   context: RequestContext,
   deps: ReconstructionExecutionServiceDeps,
 ): Promise<boolean> {
-  const pathSegments = context.pathname.split("/").filter(Boolean);
+  const pathSegments = getReconstructionRoutePathSegments(context);
   const jobId = pathSegments[3];
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "analyze")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["analyze"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, analyzeReconstructionJob, {
       failureStage: (job) => job.currentStageId,
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "apply")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["apply"], "POST")) {
     await handleReconstructionJobApply(response, jobId, deps);
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "clear")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["clear"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, clearReconstructionJob, {
       failureStage: "apply-rebuild",
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "render")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["render"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, renderReconstructionJob, {
       failureStage: "render-preview",
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "measure")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["measure"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, measureReconstructionJob, {
       failureStage: "measure-diff",
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "refine")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["refine"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, refineReconstructionJob, {
       failureStage: "refine",
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "iterate")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["iterate"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, iterateReconstructionJob, {
       failureStage: (job) => (job.currentStageId === "measure-diff" ? "measure-diff" : "render-preview"),
     });
     return true;
   }
 
-  if (isReconstructionJobActionRoute(pathSegments, context, "loop")) {
+  if (isReconstructionJobChildRoute(pathSegments, context, ["loop"], "POST")) {
     await handleReconstructionJobAction(response, jobId, deps, loopReconstructionJob, {
       failureStage: "refine",
       normalizeErrorDetail: (detail) =>

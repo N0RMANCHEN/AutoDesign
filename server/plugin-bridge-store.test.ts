@@ -100,6 +100,83 @@ test("registerPluginSession and heartbeatPluginSession preserve selection when h
   });
 });
 
+test("registerPluginSession and heartbeatPluginSession preserve or clear variable snapshots based on explicit payload fields", async () => {
+  await withTempBridgeStore(async (store) => {
+    const registered = await store.registerPluginSession(
+      createSessionPayload({
+        hasStyleSnapshot: true,
+        styles: [
+          {
+            id: "S:paint-primary",
+            styleType: "paint",
+            name: "Brand/Primary",
+            description: "main brand fill",
+          },
+        ],
+        hasVariableSnapshot: true,
+        variableCollections: [
+          {
+            id: "collection-colors",
+            name: "Colors",
+            defaultModeId: "mode-light",
+            hiddenFromPublishing: false,
+            modes: [{ modeId: "mode-light", name: "Light" }],
+          },
+        ],
+        variables: [
+          {
+            id: "var-color-primary",
+            name: "primary",
+            collectionId: "collection-colors",
+            collectionName: "Colors",
+            resolvedType: "COLOR",
+            hiddenFromPublishing: false,
+            scopes: ["ALL_FILLS"],
+            valuesByMode: [
+              { modeId: "mode-light", modeName: "Light", kind: "color", value: "#0F172A" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    assert.equal(registered.hasStyleSnapshot, true);
+    assert.equal(registered.styles?.length, 1);
+    assert.equal(registered.hasVariableSnapshot, true);
+    assert.equal(registered.variables?.length, 1);
+
+    const preserved = await store.heartbeatPluginSession(
+      registered.id,
+      createSessionPayload({
+        selection: [],
+      }),
+    );
+
+    assert.equal(preserved?.hasStyleSnapshot, true);
+    assert.equal(preserved?.styles?.length, 1);
+    assert.equal(preserved?.hasVariableSnapshot, true);
+    assert.equal(preserved?.variables?.length, 1);
+
+    const cleared = await store.heartbeatPluginSession(
+      registered.id,
+      createSessionPayload({
+        selection: [],
+        hasStyleSnapshot: true,
+        styles: [],
+        hasVariableSnapshot: true,
+        variableCollections: [],
+        variables: [],
+      }),
+    );
+
+    assert.equal(cleared?.hasStyleSnapshot, true);
+    assert.deepEqual(cleared?.styles, []);
+    assert.equal(cleared?.hasVariableSnapshot, true);
+    assert.deepEqual(cleared?.variableCollections, []);
+    assert.deepEqual(cleared?.variables, []);
+  });
+});
+
 test("queuePluginCommand, claimNextPluginCommand and completePluginCommand persist the command lifecycle", async () => {
   await withTempBridgeStore(async (store) => {
     const session = await store.registerPluginSession(createSessionPayload());

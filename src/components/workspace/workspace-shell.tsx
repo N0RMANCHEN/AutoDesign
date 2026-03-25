@@ -1,23 +1,30 @@
-import { startTransition, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   composePluginCommandsFromPrompt,
   type PluginCommandComposition,
 } from "../../../shared/plugin-command-composer";
 import type { FigmaPluginCommandBatch } from "../../../shared/plugin-contract";
-import type {
-  PluginBridgeCommandRecord,
-  PluginBridgeSession,
-  PluginBridgeSnapshot,
-} from "../../../shared/plugin-bridge";
+import type { RuntimeBridgeDispatchReceipt } from "../../../shared/runtime-bridge-dispatch";
+import type { RuntimeBridgeOverview } from "../../../shared/runtime-bridge-overview";
+import type { RuntimeDesignContext } from "../../../shared/runtime-design-context";
 import type {
   ContextPack,
   FigmaSyncPayload,
-  ProjectData,
   RuntimeAction,
   RuntimeEnvelope,
 } from "../../../shared/types";
+import type {
+  WorkspaceMappingStatusReceipt,
+  WorkspaceReadModel,
+  WorkspaceReviewQueueUpdateReceipt,
+} from "../../../shared/workspace-read-model";
+import {
+  WorkspaceBridgeCommandPanel,
+  WorkspaceBridgeStatusPanel,
+} from "./bridge-panels";
 import { Panel } from "./panel";
+import { WorkspaceRuntimePanels } from "./runtime-panels";
 import { StatusPill } from "./status-pill";
 
 const defaultSyncPayload = JSON.stringify(
@@ -87,9 +94,71 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
   return (await response.json()) as T;
 }
 
+function buildDesignContextRequestKey(params: {
+  selectionIds: string[];
+  action: RuntimeAction;
+  targetSessionId: string;
+  workspaceUpdatedAt: string;
+}) {
+  return JSON.stringify({
+    selectionIds: params.selectionIds,
+    action: params.action,
+    targetSessionId: params.targetSessionId,
+    workspaceUpdatedAt: params.workspaceUpdatedAt,
+  });
+}
+
+function reconcileSelectionIds(params: {
+  current: string[];
+  workspace: WorkspaceReadModel;
+}) {
+  const availableIds = new Set(params.workspace.selection.options.map((item) => item.id));
+  const current = params.current.filter((id) => availableIds.has(id));
+  if (current.length > 0) {
+    return current;
+  }
+  return params.workspace.selection.defaultIds.filter((id) => availableIds.has(id));
+}
+
+type ReviewQueueDraft = {
+  status: WorkspaceReadModel["reviewQueue"][number]["status"];
+  owner: string;
+};
+
+function buildReviewQueueDraft(
+  review: WorkspaceReadModel["reviewQueue"][number],
+): ReviewQueueDraft {
+  return {
+    status: review.status,
+    owner: review.owner,
+  };
+}
+
+function reconcileReviewQueueDrafts(params: {
+  current: Record<string, ReviewQueueDraft>;
+  workspace: WorkspaceReadModel;
+}) {
+  const validIds = new Set(params.workspace.reviewQueue.map((item) => item.id));
+  return Object.fromEntries(
+    Object.entries(params.current).filter(([reviewId]) => validIds.has(reviewId)),
+  );
+}
+
+function isReviewQueueDraftDirty(params: {
+  draft: ReviewQueueDraft;
+  review: WorkspaceReadModel["reviewQueue"][number];
+}) {
+  return (
+    params.draft.status !== params.review.status ||
+    params.draft.owner.trim() !== params.review.owner
+  );
+}
+
 export function WorkspaceShell() {
-  const [project, setProject] = useState<ProjectData | null>(null);
+  const [workspaceModel, setWorkspaceModel] = useState<WorkspaceReadModel | null>(null);
   const [selectionIds, setSelectionIds] = useState<string[]>([]);
+  const [designContext, setDesignContext] = useState<RuntimeDesignContext | null>(null);
+  const [designContextRequestKey, setDesignContextRequestKey] = useState<string | null>(null);
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [runtimeOutput, setRuntimeOutput] = useState<RuntimeEnvelope | null>(null);
   const [activeAction, setActiveAction] =
@@ -104,56 +173,64 @@ export function WorkspaceShell() {
   const [commandComposition, setCommandComposition] = useState<PluginCommandComposition | null>(
     null,
   );
-  const [bridgeSessions, setBridgeSessions] = useState<PluginBridgeSession[]>([]);
-  const [bridgeCommands, setBridgeCommands] = useState<PluginBridgeCommandRecord[]>([]);
+  const [bridgeOverview, setBridgeOverview] = useState<RuntimeBridgeOverview | null>(null);
+  const [lastBridgeDispatchReceipt, setLastBridgeDispatchReceipt] =
+    useState<RuntimeBridgeDispatchReceipt | null>(null);
   const [selectedBridgeSessionId, setSelectedBridgeSessionId] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [bridgeMessage, setBridgeMessage] = useState("");
+  const [reviewMessage, setReviewMessage] = useState("");
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewQueueDraft>>({});
   const [isBusy, setIsBusy] = useState(false);
 
   useEffect(() => {
-    void loadProject();
-    void loadBridgeSnapshot(false);
+    void loadWorkspaceReadModel();
+    void loadBridgeOverview(false);
   }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void loadBridgeSnapshot(false);
+      void loadBridgeOverview(false);
     }, 3000);
 
     return () => window.clearInterval(timer);
   }, []);
 
-  async function loadProject() {
+  async function loadWorkspaceReadModel() {
     setIsBusy(true);
     try {
-      const nextProject = await fetchJson<ProjectData>("/api/project");
-      setProject(nextProject);
-      setSelectionIds((current) => {
-        if (current.length > 0) {
-          return current;
-        }
-        return nextProject.runtimeSessions[0]?.selectionIds ?? [];
-      });
+      const nextWorkspace = await fetchJson<WorkspaceReadModel>("/api/workspace/read-model");
+      setWorkspaceModel(nextWorkspace);
+      setSelectionIds((current) =>
+        reconcileSelectionIds({
+          current,
+          workspace: nextWorkspace,
+        }),
+      );
+      setReviewDrafts((current) =>
+        reconcileReviewQueueDrafts({
+          current,
+          workspace: nextWorkspace,
+        }),
+      );
     } finally {
       setIsBusy(false);
     }
   }
 
-  async function loadBridgeSnapshot(showBusy: boolean) {
+  async function loadBridgeOverview(showBusy: boolean) {
     if (showBusy) {
       setIsBusy(true);
     }
 
     try {
-      const snapshot = await fetchJson<PluginBridgeSnapshot>("/api/plugin-bridge");
-      setBridgeSessions(snapshot.sessions);
-      setBridgeCommands(snapshot.commands);
+      const overview = await fetchJson<RuntimeBridgeOverview>("/api/runtime/bridge-overview");
+      setBridgeOverview(overview);
       setSelectedBridgeSessionId((current) => {
-        if (current && snapshot.sessions.some((session) => session.id === current)) {
+        if (current && overview.sessions.some((session) => session.id === current)) {
           return current;
         }
-        return snapshot.sessions[0]?.id ?? "";
+        return overview.sessions[0]?.id ?? "";
       });
     } finally {
       if (showBusy) {
@@ -170,50 +247,59 @@ export function WorkspaceShell() {
     );
   }
 
-  async function saveProject(nextProject: ProjectData) {
+  async function resetWorkspace() {
     setIsBusy(true);
     try {
-      const saved = await fetchJson<ProjectData>("/api/project", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextProject),
-      });
-      setProject(saved);
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function resetProject() {
-    setIsBusy(true);
-    try {
-      const reset = await fetchJson<ProjectData>("/api/project/reset", {
+      const reset = await fetchJson<WorkspaceReadModel>("/api/workspace/reset", {
         method: "POST",
       });
-      setProject(reset);
-      setSelectionIds(reset.runtimeSessions[0]?.selectionIds ?? []);
+      setWorkspaceModel(reset);
+      setSelectionIds(
+        reconcileSelectionIds({
+          current: [],
+          workspace: reset,
+        }),
+      );
+      setDesignContext(null);
+      setDesignContextRequestKey(null);
       setContextPack(null);
       setRuntimeOutput(null);
+      setLastBridgeDispatchReceipt(null);
+      setReviewDrafts({});
+      setReviewMessage("");
       setSyncMessage("已重置为内置示例数据。");
     } finally {
       setIsBusy(false);
     }
   }
 
-  async function generateContextPack() {
+  async function generateDesignContext() {
+    if (!workspaceModel) {
+      return;
+    }
     setIsBusy(true);
     try {
       const graphKind = activeAction.startsWith("knowledge") ? "knowledge" : "codegraph";
-      const nextPack = await fetchJson<ContextPack>("/api/runtime/context-pack", {
+      const targetSessionId = String(selectedBridgeSessionId || "").trim();
+      const nextRequestKey = buildDesignContextRequestKey({
+        selectionIds,
+        action: activeAction,
+        targetSessionId,
+        workspaceUpdatedAt: workspaceModel.workspace.updatedAt,
+      });
+      const nextDesignContext = await fetchJson<RuntimeDesignContext>("/api/runtime/design-context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selectionIds,
           graphKind,
           action: activeAction,
+          ...(targetSessionId ? { targetSessionId } : {}),
         }),
       });
-      setContextPack(nextPack);
+      setDesignContext(nextDesignContext);
+      setDesignContextRequestKey(nextRequestKey);
+      setContextPack(nextDesignContext.contextPack);
       setRuntimeOutput(null);
     } finally {
       setIsBusy(false);
@@ -241,12 +327,24 @@ export function WorkspaceShell() {
     setIsBusy(true);
     try {
       const payload = JSON.parse(syncPayload) as FigmaSyncPayload;
-      const nextProject = await fetchJson<ProjectData>("/api/figma/sync", {
+      const nextWorkspace = await fetchJson<WorkspaceReadModel>("/api/workspace/figma-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setProject(nextProject);
+      setWorkspaceModel(nextWorkspace);
+      setSelectionIds((current) =>
+        reconcileSelectionIds({
+          current,
+          workspace: nextWorkspace,
+        }),
+      );
+      setReviewDrafts((current) =>
+        reconcileReviewQueueDrafts({
+          current,
+          workspace: nextWorkspace,
+        }),
+      );
       setSyncMessage(`已同步设计源：${payload.source.name}`);
     } catch (error) {
       setSyncMessage(
@@ -266,7 +364,7 @@ export function WorkspaceShell() {
     setIsBusy(true);
     try {
       const payload = JSON.parse(pluginCommands) as FigmaPluginCommandBatch;
-      const record = await fetchJson<PluginBridgeCommandRecord>("/api/plugin-bridge/commands", {
+      const receipt = await fetchJson<RuntimeBridgeDispatchReceipt>("/api/runtime/bridge-dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -275,8 +373,11 @@ export function WorkspaceShell() {
           payload,
         }),
       });
-      setBridgeMessage(`已把命令推送到插件队列：${record.id}`);
-      await loadBridgeSnapshot(false);
+      setLastBridgeDispatchReceipt(receipt);
+      setBridgeMessage(
+        `已把 ${receipt.payloadCommandCount} 条命令推送到插件队列：${receipt.command.id}`,
+      );
+      await loadBridgeOverview(false);
     } catch (error) {
       setBridgeMessage(
         error instanceof Error ? `下发失败：${error.message}` : "下发失败：未知错误",
@@ -299,25 +400,102 @@ export function WorkspaceShell() {
 
   function updateMappingStatus(
     mappingId: string,
-    status: ProjectData["componentMappings"][number]["status"],
+    status: WorkspaceReadModel["mappings"][number]["status"],
   ) {
-    if (!project) {
-      return;
-    }
-
-    startTransition(() => {
-      const nextProject: ProjectData = {
-        ...project,
-        componentMappings: project.componentMappings.map((mapping) =>
-          mapping.id === mappingId ? { ...mapping, status } : mapping,
-        ),
-      };
-      setProject(nextProject);
-      void saveProject(nextProject);
-    });
+    void (async () => {
+      setIsBusy(true);
+      try {
+        const receipt = await fetchJson<WorkspaceMappingStatusReceipt>(
+          "/api/workspace/mapping-status",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mappingId,
+              status,
+            }),
+          },
+        );
+        setWorkspaceModel((current) => {
+          if (!current) {
+            return current;
+          }
+          return {
+            ...current,
+            workspace: {
+              ...current.workspace,
+              updatedAt: receipt.workspaceUpdatedAt,
+            },
+            mappings: current.mappings.map((mapping) =>
+              mapping.id === mappingId ? receipt.mapping : mapping,
+            ),
+          };
+        });
+      } finally {
+        setIsBusy(false);
+      }
+    })();
   }
 
-  if (!project) {
+  function updateReviewDraft(
+    reviewId: string,
+    nextDraft: ReviewQueueDraft,
+  ) {
+    setReviewDrafts((current) => ({
+      ...current,
+      [reviewId]: nextDraft,
+    }));
+  }
+
+  async function updateReviewQueueItem(
+    reviewId: string,
+    draft: ReviewQueueDraft,
+  ) {
+    setIsBusy(true);
+    try {
+      const receipt = await fetchJson<WorkspaceReviewQueueUpdateReceipt>(
+        "/api/workspace/review-queue-item",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reviewId,
+            status: draft.status,
+            owner: draft.owner.trim(),
+          }),
+        },
+      );
+      setWorkspaceModel((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          workspace: {
+            ...current.workspace,
+            updatedAt: receipt.workspaceUpdatedAt,
+          },
+          reviewQueue: current.reviewQueue.map((review) =>
+            review.id === reviewId ? receipt.review : review,
+          ),
+        };
+      });
+      setReviewDrafts((current) => {
+        const next = { ...current };
+        delete next[reviewId];
+        return next;
+      });
+      setReviewMessage(`已更新评审项：${receipt.review.title}`);
+    } catch (error) {
+      setReviewMessage(
+        error instanceof Error ? `评审更新失败：${error.message}` : "评审更新失败：未知错误",
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  if (!workspaceModel) {
     return (
       <div className="workspace-shell">
         <div className="workspace-loading">正在加载本地工作台数据…</div>
@@ -325,43 +503,30 @@ export function WorkspaceShell() {
     );
   }
 
-  const selectionPool = [
-    ...project.designSources.map((item) => ({
-      id: item.id,
-      label: item.name,
-      kind: "Design Source",
-    })),
-    ...project.designScreens.map((item) => ({
-      id: item.id,
-      label: item.name,
-      kind: "Screen",
-    })),
-    ...project.componentMappings.map((item) => ({
-      id: item.id,
-      label: item.designName,
-      kind: "Component",
-    })),
-    ...project.reviewItems.map((item) => ({
-      id: item.id,
-      label: item.title,
-      kind: "Review",
-    })),
-  ];
-
   const selectedBridgeSession =
-    bridgeSessions.find((session) => session.id === selectedBridgeSessionId) ?? null;
+    bridgeOverview?.sessions.find((session) => session.id === selectedBridgeSessionId) ?? null;
+  const currentDesignContextRequestKey = buildDesignContextRequestKey({
+    selectionIds,
+    action: activeAction,
+    targetSessionId: String(selectedBridgeSessionId || "").trim(),
+    workspaceUpdatedAt: workspaceModel.workspace.updatedAt,
+  });
+  const isDesignContextStale =
+    Boolean(designContext) && designContextRequestKey !== currentDesignContextRequestKey;
+  const designContextSessionMatchesSelection =
+    designContext?.pluginSelection.targetSessionId === (selectedBridgeSession?.id ?? null);
 
   return (
     <div className="workspace-shell">
       <header className="workspace-topbar">
         <div>
           <p className="topbar-kicker">Workspace / Shared Data Model</p>
-          <h1>{project.meta.name}</h1>
-          <p className="topbar-copy">{project.meta.description}</p>
+          <h1>{workspaceModel.workspace.name}</h1>
+          <p className="topbar-copy">{workspaceModel.workspace.description}</p>
         </div>
         <div className="topbar-actions">
           <StatusPill tone={isBusy ? "amber" : "green"} label={isBusy ? "处理中" : "就绪"} />
-          <button className="button-secondary" onClick={resetProject} type="button">
+          <button className="button-secondary" onClick={resetWorkspace} type="button">
             重置示例数据
           </button>
         </div>
@@ -386,90 +551,30 @@ export function WorkspaceShell() {
           </div>
         </Panel>
 
-        <Panel
-          title="插件命令协议"
-          description="工作台现在可以直接把命令推送到在线插件，不再需要手动复制 JSON。"
-        >
-          <div className="sync-panel">
-            <label className="field">
-              <span>Natural Language</span>
-              <textarea
-                className="code-box"
-                onChange={(event) => setNaturalLanguagePrompt(event.target.value)}
-                spellCheck={false}
-                value={naturalLanguagePrompt}
-              />
-            </label>
-            <div className="inline-actions">
-              <button className="button-secondary" onClick={composePluginCommands} type="button">
-                从自然语言生成命令
-              </button>
-              <span className="muted-line">
-                支持示例：`改成粉色`、`描边蓝色`、`圆角 16`、`透明度 80`、`变量 Brand/pink/500 #FF6FAE 绑定`
-              </span>
-            </div>
-            <label className="field">
-              <span>Target Plugin Session</span>
-              <select
-                className="status-select"
-                onChange={(event) => setSelectedBridgeSessionId(event.target.value)}
-                value={selectedBridgeSessionId}
-              >
-                {bridgeSessions.length === 0 ? <option value="">暂无在线插件</option> : null}
-                {bridgeSessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.label} · {session.fileName} / {session.pageName} · {session.status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <textarea
-              className="code-box code-box-short"
-              onChange={(event) => setPluginCommands(event.target.value)}
-              spellCheck={false}
-              value={pluginCommands}
-            />
-            <div className="inline-actions">
-              <button className="button-primary" onClick={dispatchPluginCommands} type="button">
-                推送到插件
-              </button>
-              <button
-                className="button-secondary"
-                onClick={() => {
-                  void loadBridgeSnapshot(true);
-                }}
-                type="button"
-              >
-                刷新桥接状态
-              </button>
-            </div>
-            <p className="muted-line">
-              {bridgeMessage ||
-                "工作台通过本地桥接队列下发命令，插件轮询领取并回传执行结果。"}
-            </p>
-            {commandComposition ? (
-              <div className="token-row">
-                {commandComposition.notes.map((note) => (
-                  <span className="token token-accent" key={note}>
-                    {note}
-                  </span>
-                ))}
-                {commandComposition.warnings.map((warning) => (
-                  <span className="token" key={warning}>
-                    warning: {warning}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </Panel>
+        <WorkspaceBridgeCommandPanel
+          naturalLanguagePrompt={naturalLanguagePrompt}
+          onNaturalLanguagePromptChange={setNaturalLanguagePrompt}
+          onComposePluginCommands={composePluginCommands}
+          bridgeOverview={bridgeOverview}
+          selectedBridgeSessionId={selectedBridgeSessionId}
+          onSelectedBridgeSessionIdChange={setSelectedBridgeSessionId}
+          pluginCommands={pluginCommands}
+          onPluginCommandsChange={setPluginCommands}
+          onDispatchPluginCommands={dispatchPluginCommands}
+          onRefreshBridgeOverview={() => {
+            void loadBridgeOverview(true);
+          }}
+          bridgeMessage={bridgeMessage}
+          commandComposition={commandComposition}
+          lastBridgeDispatchReceipt={lastBridgeDispatchReceipt}
+        />
       </section>
 
       <section className="workspace-grid">
         <div className="workspace-column">
           <Panel title="设计源" description="本地后端保存的 Figma 文件快照。">
             <div className="stack-list">
-              {project.designSources.map((source) => (
+              {workspaceModel.designSources.map((source) => (
                 <article className="data-card" key={source.id}>
                   <div className="data-card-head">
                     <h3>{source.name}</h3>
@@ -489,6 +594,10 @@ export function WorkspaceShell() {
                       <dd>{source.branch}</dd>
                     </div>
                   </dl>
+                  <div className="token-row">
+                    <span className="token">screens: {source.screenCount}</span>
+                    <span className="token token-accent">mappings: {source.mappingCount}</span>
+                  </div>
                 </article>
               ))}
             </div>
@@ -496,7 +605,7 @@ export function WorkspaceShell() {
 
           <Panel title="页面与组件映射" description="把设计页面和 React 目标组件放在同一处核对。">
             <div className="stack-list">
-              {project.componentMappings.map((mapping) => (
+              {workspaceModel.mappings.map((mapping) => (
                 <article className="data-card" key={mapping.id}>
                   <div className="data-card-head">
                     <div>
@@ -527,6 +636,11 @@ export function WorkspaceShell() {
                         state: {item}
                       </span>
                     ))}
+                    {mapping.screenNames.map((screenName) => (
+                      <span className="token" key={`${mapping.id}-${screenName}`}>
+                        screen: {screenName}
+                      </span>
+                    ))}
                   </div>
                 </article>
               ))}
@@ -536,26 +650,89 @@ export function WorkspaceShell() {
 
         <div className="workspace-column workspace-column-wide">
           <Panel title="评审与联调队列" description="记录设计差异、原型问题和 Runtime 测试待办。">
+            <p className="muted-line">
+              {reviewMessage || "评审队列通过 workspace write surface 更新 status / owner。"}
+            </p>
             <div className="board-grid">
-              {project.reviewItems.map((item) => (
-                <article className="board-card" key={item.id}>
-                  <div className="data-card-head">
-                    <StatusPill
-                      tone={
-                        item.status === "done"
-                          ? "green"
-                          : item.status === "doing"
-                            ? "blue"
-                            : "slate"
-                      }
-                      label={`${item.area} / ${item.status}`}
-                    />
-                    <span className="owner-tag">{item.owner}</span>
-                  </div>
-                  <h3>{item.title}</h3>
-                  <p>{item.detail}</p>
-                </article>
-              ))}
+              {workspaceModel.reviewQueue.map((item) => {
+                const draft = reviewDrafts[item.id] ?? buildReviewQueueDraft(item);
+                const canSave =
+                  isReviewQueueDraftDirty({ draft, review: item }) &&
+                  draft.owner.trim().length > 0;
+                return (
+                  <article className="board-card" key={item.id}>
+                    <div className="data-card-head">
+                      <StatusPill
+                        tone={
+                          item.status === "done"
+                            ? "green"
+                            : item.status === "doing"
+                              ? "blue"
+                              : "slate"
+                        }
+                        label={`${item.area} / ${item.status}`}
+                      />
+                      <span className="owner-tag">{item.owner}</span>
+                    </div>
+                    <h3>{item.title}</h3>
+                    <p>{item.detail}</p>
+                    <div className="review-edit-grid">
+                      <label className="field">
+                        <span>Status</span>
+                        <select
+                          className="status-select"
+                          onChange={(event) =>
+                            updateReviewDraft(item.id, {
+                              ...draft,
+                              status: event.target.value as typeof draft.status,
+                            })
+                          }
+                          value={draft.status}
+                        >
+                          <option value="todo">todo</option>
+                          <option value="doing">doing</option>
+                          <option value="done">done</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Owner</span>
+                        <input
+                          className="status-select"
+                          onChange={(event) =>
+                            updateReviewDraft(item.id, {
+                              ...draft,
+                              owner: event.target.value,
+                            })
+                          }
+                          type="text"
+                          value={draft.owner}
+                        />
+                      </label>
+                    </div>
+                    <div className="inline-actions">
+                      <button
+                        className="button-secondary"
+                        disabled={!canSave || isBusy}
+                        onClick={() => {
+                          void updateReviewQueueItem(item.id, draft);
+                        }}
+                        type="button"
+                      >
+                        保存评审
+                      </button>
+                    </div>
+                    {item.relatedLabels.length > 0 ? (
+                      <div className="token-row">
+                        {item.relatedLabels.map((label) => (
+                          <span className="token" key={`${item.id}-${label}`}>
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           </Panel>
 
@@ -578,129 +755,35 @@ export function WorkspaceShell() {
         </div>
 
         <div className="workspace-column">
-          <Panel
-            title="插件桥接状态"
-            description="这里显示在线插件会话、当前 selection 摘要和最近命令执行结果。"
-          >
-            <div className="stack-list">
-              {selectedBridgeSession ? (
-                <article className="data-card">
-                  <div className="data-card-head">
-                    <div>
-                      <h3>{selectedBridgeSession.label}</h3>
-                      <p className="muted-line">
-                        {selectedBridgeSession.fileName} / {selectedBridgeSession.pageName}
-                      </p>
-                    </div>
-                    <StatusPill
-                      tone={selectedBridgeSession.status === "online" ? "green" : "slate"}
-                      label={selectedBridgeSession.status}
-                    />
-                  </div>
-                  <div className="token-row">
-                    {selectedBridgeSession.selection.length > 0 ? (
-                      selectedBridgeSession.selection.map((node) => (
-                        <span className="token" key={node.id}>
-                          {node.name} · {node.type}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="muted-line">插件当前没有选中节点。</span>
-                    )}
-                  </div>
-                </article>
-              ) : (
-                <article className="data-card">
-                  <p>还没有插件连接到本地桥接。先在 Figma 中运行 `AutoDesign`。</p>
-                </article>
-              )}
+          <WorkspaceBridgeStatusPanel
+            bridgeOverview={bridgeOverview}
+            selectedBridgeSession={selectedBridgeSession}
+            isDesignContextSynced={
+              Boolean(designContext) &&
+              !isDesignContextStale &&
+              designContextSessionMatchesSelection
+            }
+          />
 
-              {bridgeCommands.slice(0, 5).map((command) => (
-                <article className="data-card" key={command.id}>
-                  <div className="data-card-head">
-                    <div>
-                      <h3>{command.id}</h3>
-                      <p className="muted-line">{command.targetSessionId}</p>
-                    </div>
-                    <StatusPill
-                      tone={
-                        command.status === "succeeded"
-                          ? "green"
-                          : command.status === "failed"
-                            ? "amber"
-                            : command.status === "claimed"
-                              ? "blue"
-                              : "slate"
-                      }
-                      label={command.status}
-                    />
-                  </div>
-                  <p>{command.resultMessage || "等待插件领取或回传结果。"}</p>
-                </article>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel title="Runtime AI 测试台" description="选择对象，生成 Context Pack，再跑本地 action。">
-            <div className="runtime-controls">
-              <label className="field">
-                <span>Action</span>
-                <select
-                  className="status-select"
-                  onChange={(event) => setActiveAction(event.target.value as RuntimeAction)}
-                  value={activeAction}
-                >
-                  {actionOptions.map((action) => (
-                    <option key={action} value={action}>
-                      {action}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="selection-grid">
-                {selectionPool.map((item) => (
-                  <label className="selection-item" key={item.id}>
-                    <input
-                      checked={selectionIds.includes(item.id)}
-                      onChange={() => toggleSelection(item.id)}
-                      type="checkbox"
-                    />
-                    <span>
-                      <strong>{item.label}</strong>
-                      <small>{item.kind}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="inline-actions">
-                <button className="button-primary" onClick={generateContextPack} type="button">
-                  生成 Context Pack
-                </button>
-                <button
-                  className="button-secondary"
-                  disabled={!contextPack}
-                  onClick={runAction}
-                  type="button"
-                >
-                  运行 Action
-                </button>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="Context Pack" description="用于发送给 Runtime AI 的结构化输入。">
-            <pre className="code-box code-box-short">
-              {contextPack ? JSON.stringify(contextPack, null, 2) : "请先生成 Context Pack"}
-            </pre>
-          </Panel>
-
-          <Panel title="Action 输出" description="本地模拟的 JSON-only 响应，可替换为真实模型结果。">
-            <pre className="code-box code-box-short">
-              {runtimeOutput ? JSON.stringify(runtimeOutput, null, 2) : "请先运行 Action"}
-            </pre>
-          </Panel>
+          <WorkspaceRuntimePanels
+            actionOptions={actionOptions}
+            activeAction={activeAction}
+            onActiveActionChange={setActiveAction}
+            selectionPool={workspaceModel.selection.options.map((item) => ({
+              id: item.id,
+              label: item.label,
+              kind: item.kindLabel,
+            }))}
+            selectionIds={selectionIds}
+            onToggleSelection={toggleSelection}
+            onGenerateDesignContext={generateDesignContext}
+            onRunAction={runAction}
+            canRunAction={Boolean(contextPack) && !isDesignContextStale}
+            isDesignContextStale={isDesignContextStale}
+            designContext={designContext}
+            contextPack={contextPack}
+            runtimeOutput={runtimeOutput}
+          />
         </div>
       </section>
     </div>
