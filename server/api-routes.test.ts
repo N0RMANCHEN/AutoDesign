@@ -413,14 +413,16 @@ test("api_routes expose runtime bridge dispatch receipt without leaking raw comm
   });
 });
 
-test("api_routes expose seeded project data and support figma sync updates", async () => {
+test("api_routes expose workspace read model, support workspace figma sync and retire legacy project routes", async () => {
   await withInMemoryServer(async (server) => {
-    const initialProject = await requestJson<any>(server, "/api/project");
-    assert.equal(initialProject.response.status, 200);
-    assert.equal(initialProject.body.meta.id, "autodesign-main");
-    assert.ok(Array.isArray(initialProject.body.designSources) && initialProject.body.designSources.length > 0);
+    const initialWorkspace = await requestJson<any>(server, "/api/workspace/read-model");
+    assert.equal(initialWorkspace.response.status, 200);
+    assert.equal(initialWorkspace.body.workspace.id, "autodesign-main");
+    assert.ok(Array.isArray(initialWorkspace.body.designSources) && initialWorkspace.body.designSources.length > 0);
+    assert.equal(initialWorkspace.body.designScreens, undefined);
+    assert.equal(initialWorkspace.body.componentMappings, undefined);
 
-    const synced = await requestJson<any>(server, "/api/figma/sync", {
+    const synced = await requestJson<any>(server, "/api/workspace/figma-sync", {
       method: "POST",
       body: JSON.stringify({
         source: {
@@ -450,12 +452,32 @@ test("api_routes expose seeded project data and support figma sync updates", asy
     });
     assert.equal(synced.response.status, 200);
     assert.equal(synced.body.designSources[0]?.id, "source-billing-flow");
-    assert.ok(synced.body.designScreens.some((screen: { id: string }) => screen.id === "screen-billing-review"));
+    assert.ok(synced.body.screens.some((screen: { id: string }) => screen.id === "screen-billing-review"));
     assert.ok(
-      synced.body.componentMappings.some(
+      synced.body.mappings.some(
         (mapping: { id: string }) => mapping.id === "mapping-billing-summary-card",
       ),
     );
+    assert.equal(synced.body.designScreens, undefined);
+    assert.equal(synced.body.componentMappings, undefined);
+
+    const legacyProject = await requestJson<any>(server, "/api/project");
+    assert.equal(legacyProject.response.status, 404);
+
+    const legacySync = await requestJson<any>(server, "/api/figma/sync", {
+      method: "POST",
+      body: JSON.stringify({
+        source: {
+          name: "Legacy Flow",
+          figmaFileKey: "FigmaKey-Legacy",
+          branch: "main",
+          summary: "legacy route should be retired",
+        },
+        screens: [],
+        components: [],
+      }),
+    });
+    assert.equal(legacySync.response.status, 404);
   });
 });
 

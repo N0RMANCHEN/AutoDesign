@@ -16,11 +16,6 @@ import { readBody, sendJson } from "../http-utils.js";
 import { readProject, resetProject, writeProject } from "../storage.js";
 import type { RequestContext } from "./request-context.js";
 
-async function handleProjectGet(response: ServerResponse) {
-  const project = await readProject();
-  sendJson(response, 200, project);
-}
-
 function applyFigmaSyncPayload(params: {
   project: ProjectData;
   payload: FigmaSyncPayload;
@@ -85,31 +80,6 @@ function applyFigmaSyncPayload(params: {
     designScreens: nextScreens,
     componentMappings: nextMappings,
   };
-}
-
-async function handleProjectPut(
-  request: IncomingMessage,
-  response: ServerResponse,
-) {
-  const body = await readBody<ProjectData>(request);
-  const saved = await writeProject(body);
-  sendJson(response, 200, saved);
-}
-
-async function handleProjectReset(response: ServerResponse) {
-  const project = await resetProject();
-  sendJson(response, 200, project);
-}
-
-async function handleFigmaSync(
-  request: IncomingMessage,
-  response: ServerResponse,
-) {
-  const body = await readBody<FigmaSyncPayload>(request);
-  const project = await readProject();
-  const saved = await writeProject(applyFigmaSyncPayload({ project, payload: body }));
-
-  sendJson(response, 200, saved);
 }
 
 async function handleWorkspaceReadModel(response: ServerResponse) {
@@ -280,26 +250,6 @@ export async function tryHandleWorkspaceRoute(
 
   if (context.pathname === "/api/workspace/review-queue-item" && context.method === "POST") {
     await handleWorkspaceReviewQueueItem(request, response);
-    return true;
-  }
-
-  if (context.pathname === "/api/project" && context.method === "GET") {
-    await handleProjectGet(response);
-    return true;
-  }
-
-  if (context.pathname === "/api/project" && context.method === "PUT") {
-    await handleProjectPut(request, response);
-    return true;
-  }
-
-  if (context.pathname === "/api/project/reset" && context.method === "POST") {
-    await handleProjectReset(response);
-    return true;
-  }
-
-  if (context.pathname === "/api/figma/sync" && context.method === "POST") {
-    await handleFigmaSync(request, response);
     return true;
   }
 

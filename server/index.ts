@@ -116,6 +116,11 @@ async function routeRequest(
     return;
   }
 
+  if (context.pathname.startsWith("/api/")) {
+    sendJson(response, 404, { ok: false, error: "Route not found" });
+    return;
+  }
+
   if (context.method === "GET" && !(await serveStaticAsset(response, context.pathname))) {
     sendText(response, 404, "Not found");
     return;

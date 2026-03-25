@@ -26,6 +26,7 @@
 - workspace UI 不再直接消费 `/api/project`，而是优先消费稳定的 workspace / runtime read-write surface
 - review queue 的 `status / owner` 更新通过窄化 receipt 写回，不再要求 UI 理解原始 `ReviewItem` 存储形状
 - design screen truth 通过显式 workspace screen catalog 暴露，而不是让 UI 从泛化 `selection.options` 或原始 `designScreens` 存储形状里自行回推
+- legacy `/api/project`、`/api/project/reset`、`/api/figma/sync` 不再作为工作台相关对外 surface 保留
 - workspace 优先消费稳定的 runtime read/write surface，而不是 bridge snapshot / command record 细节
 - 设计事实读取与后续语义推断 / 代码生成边界清晰
 
