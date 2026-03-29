@@ -1,6 +1,6 @@
 # AutoDesign Roadmap
 
-- 更新日期：2026-03-29
+- 更新日期：2026-03-30
 - 维护规则：本文件只保留当前执行真相，不保留历史流水；已完成事项应移出 active list，并在 `doc/plans/archive/`、`CHANGELOG.md` 或 `reports/` 留痕。
 
 ## 1. 治理规则
@@ -11,7 +11,7 @@
 
 ## 2. 当前执行面板
 
-- `current_focus`: `文档治理体系落地 + design-core 主干迁移 + reconstruction workflow 稳定化 + plugin runtime / bridge CLI 降污 + 测试验收补强 + Figma MCP 对齐取舍 + code-to-figma 可逆性预检 + code-to-design 运行态采样与计划链`
+- `current_focus`: `文档治理体系落地 + design-core 主干迁移 + reconstruction workflow 稳定化 + plugin runtime / bridge CLI 降污 + 测试验收补强 + Figma MCP 对齐取舍 + schema-first capability contract 收敛 + agent 可自修复诊断强化 + code-to-figma 可逆性预检 + code-to-design 运行态采样与计划链`
 - `plugin_runtime`: `active`
 - `workspace_runtime`: `active`
 - `bridge_runtime`: `active`
@@ -48,11 +48,14 @@
   - 收紧 `plugin:send`、bridge CLI、external dispatch、prompt composition 的安全边界和失败提示
   - 把 subtree inspect、component / instance、mask、auto layout 的读写边界补齐到 contracts + tests
   - 保持 `design-core` 继续从 reconstruction compatibility 层提升为通用主干
+  - 参考 Vibma，把 capability / bridge / runtime contract 收敛为 schema-first 单一真相，统一生成 TS 类型、参数 guard、help 文案和 capability catalog
+  - 统一 batch create / update / delete 的响应形状、warning hoist 和 response size contract，避免 runtime handler 与 bridge CLI 各自漂移
 - 完成判据：
   - 工作台不直接写 Figma
   - bridge 不持有 Figma 运行时对象
   - shared 不依赖运行时层
   - 关键结构能力有对应文档和验证路径
+  - capability 定义、帮助文案、catalog 与运行时 contract 不再多处手写漂移
 
 ### R3 Reconstruction Workflow 稳定化
 
@@ -79,10 +82,13 @@
   - 把 `test:unit` 继续收口到 targeting、CLI guard、prompt composition、reconstruction contract 与 runtime helpers 的纯逻辑
   - 把 `reports/acceptance`、`reports/quality` 与 live acceptance runbook 固定成可复用执行链
   - 为发布前、回归后、重大架构改动建立最低验证清单
+  - 参考 Vibma，把错误与 warning 收成 agent 可自修复 contract，失败输出要尽量附带可选项、诊断字段和下一步修正提示
+  - 增加结构质量 lint 作为 advisory 证据层，覆盖 token 绑定、auto layout、design system hygiene，但不替代 strict gate
 - 完成判据：
   - `Test-Standards` 中的必测场景有对应执行载体
   - 关键工作流不再只靠临时手工验证
   - 新增 capability 或重建主链变化有明确验收要求
+  - strict gate 与 advisory lint 的职责分离，不再用 warning 掩盖真实阻断
 
 ### R5 Figma-to-React 上下文链收敛
 
@@ -110,11 +116,15 @@
   - 继续收紧 Code Connect-like mapping 语义，把 link / evidence / review contract 显式化
   - 把 write parity 子集明确到 capability catalog、runtime handler 与回归测试，不再宽泛铺开
   - 继续通过文档与治理规则阻止 remote hosted MCP、FigJam、Make、code-to-canvas 回流进 active scope
+  - 参考 Vibma，把 MCP-like endpoint 的 `create / get / list / update / delete` 输入输出与 batch 语义固定成稳定 contract，减少 agent 端分支判断
+  - 把工具帮助文案、错误格式、能力目录和运行时 handler 继续收敛到同一 schema 源，避免“文档支持”和“实际支持”继续漂移
+  - 引入 agent-friendly 的 warning 设计，但只用于自修复提示和设计系统 hygiene，不放宽 strict editable / strict structure 边界
 - 完成判据：
   - read/context 等价面有明确 contract、测试和工作流入口
   - design system / mapping 等价面可追踪，并能稳定服务 Figma-to-React 主链
   - safe write parity 子集在 capability catalog、plugin runtime 和回归测试中闭环
   - 非范围项继续停留在 deferred / future，不回流成当前主线
+  - tool surface 对 agent 来说是稳定、可预测、可自纠的，而不是依赖 prompt 猜测
 
 ### R7 Code-to-Figma 可逆性预检
 
@@ -140,10 +150,13 @@
   - 基于 snapshot 生成 Figma capability batch，覆盖文本、图片、基础 shape 与页面背景
   - 把 `plugin:send --json-file`、显式 `parentNodeId` targeting 和 create-image / fixed-width text capability 收成稳定主链
   - 明确 Code-to-Design 与 Direct Figma Design / Design-to-Code 的架构边界，避免再次混层
+  - 把 plan / apply / acceptance 的诊断产物继续收成 machine-readable contract，尤其是字体、变量、组件、targeting 失败时要能直接支撑下一步自修复
+  - 借鉴 Vibma 的最小响应面原则，batch 执行默认只返回真正新增信息，把冗余父节点状态和易过期快照留给显式 inspect 能力
 - 完成判据：
   - `code-to-design:capture` 与 `code-to-design:plan` 有明确 contract、脚本入口和单测
   - AItest 这类静态桌面页面可以在不改目标源码的前提下产出可执行的 Figma batch
   - Code-to-Design 继续作为 experimental 能力面管理，不冒充“任意 React 一键还原”
+  - 诊断输出足够支撑 agent 在 strict 路线下逐项排障，而不是退化成人工猜测
 
 ## 4. 当前风险
 
@@ -155,6 +168,8 @@
 - 如不区分“本地等价能力”与“官方 MCP 平台能力”，Roadmap 很容易漂移到 hosted endpoint、FigJam、Make 和 SaaS 方向
 - 如把设计语义推断直接升级成业务逻辑和自动代码生成承诺，Workspace 会从“稳定改造输入”漂移成高风险 codegen 管道
 - 如没有严格的前端可逆子集预检，任何“源码直接还原 Figma 且保持可编辑”承诺都会在复杂 CSS / 交互态上失真
+- 如 capability schema、help、catalog、tests 不是同一真相源，工具面会重新漂移成“文档一套、运行时一套、agent 认知一套”
+- 如把 warning-first 的通用创作策略直接照搬到 strict editable 主链，会重新引入 silent fallback 和结构失真
 
 ## 5. Archive Handoff
 
