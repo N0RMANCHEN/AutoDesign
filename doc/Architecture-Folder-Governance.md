@@ -57,6 +57,21 @@
 - 作用：围绕“目标 Frame + 参考图”的 analyze、context-pack、submit-analysis、apply、render、measure、refine workflow
 - 禁止：把栅格诊断路径误写成正式交付；绕过目标 Frame 清理和验收门禁直接叠层写入
 
+### 2.6 Capability Lane System
+
+- `Code -> Design`
+  - 目录：`shared/code-to-design-*`、`scripts/code-to-design-*`
+  - 作用：源码可逆性预检、运行态页面采样、Figma command plan 生成
+  - 禁止：通过修改目标项目源码来伪造“可编辑且像素级”成立
+- `Direct Figma Design`
+  - 目录：`plugins/autodesign/`、`scripts/plugin-bridge-cli.ts`
+  - 作用：直接读写 Figma、执行 capability batch
+  - 禁止：越过 Plugin API 直接在 workspace/server 层写 Figma
+- `Design -> Code`
+  - 目录：`shared/runtime-*`、`server/routes/runtime-*`、`src/components/workspace/*`
+  - 作用：提取设计事实、整理上下文、生成前端改造输入
+  - 禁止：直接漂移成无审阅的业务代码生成管道
+
 ## 3. 目录职责
 
 ### 3.1 根目录

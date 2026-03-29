@@ -9,7 +9,34 @@ export const READ_ONLY_EXTERNAL_CAPABILITY_IDS = new Set<PluginCapabilityId>([
   "selection.refresh",
   "assets.export-node-image",
   "nodes.inspect-subtree",
+  "runtime.inspect-font-catalog",
+  "runtime.probe-font-load",
 ]);
+
+const CREATION_CAPABILITY_IDS = new Set<PluginCapabilityId>([
+  "nodes.create-frame",
+  "nodes.create-text",
+  "nodes.create-image",
+  "nodes.create-rectangle",
+  "nodes.create-ellipse",
+  "nodes.create-line",
+  "nodes.create-svg",
+  "components.create-instance",
+  "nodes.duplicate",
+  "nodes.group",
+  "nodes.frame-selection",
+]);
+
+export function hasExplicitCreationParentTarget(command: FigmaCapabilityCommand) {
+  if (!CREATION_CAPABILITY_IDS.has(command.capabilityId)) {
+    return false;
+  }
+  const payload =
+    command.payload && typeof command.payload === "object"
+      ? (command.payload as { parentNodeId?: unknown })
+      : null;
+  return typeof payload?.parentNodeId === "string" && payload.parentNodeId.trim().length > 0;
+}
 
 export function requiresExplicitNodeIdsForExternalCapability(
   capabilityId: PluginCapabilityId,

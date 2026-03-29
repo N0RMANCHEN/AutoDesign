@@ -9,6 +9,29 @@
 - `Fixed`：缺陷修复
 - `Removed`：废弃或删除的内容
 
+## 2026-03-29
+
+### Added
+
+- 新增 [runtime-read-cli.ts](scripts/runtime-read-cli.ts) 和 `npm run runtime:read`，为 `bridge_overview`、`get_design_context`、`get_metadata`、`get_variable_defs`、`get_node_metadata`、`get_screenshot` 提供统一的本地只读 CLI 入口，补齐 MCP 对齐计划里缺失的 entry script
+- 新增 [code-to-figma-preflight.ts](scripts/code-to-figma-preflight.ts)、[code-to-figma-preflight.test.ts](scripts/code-to-figma-preflight.test.ts)、[code-to-figma-preflight.ts](shared/code-to-figma-preflight.ts) 和 `npm run code-to-figma:preflight`，为“前端代码 -> 可编辑 Figma”第一阶段提供严格的源码可逆性预检入口；当前会对 CSS Grid、响应式函数、滤镜/变换、交互 hooks、事件处理器和 CSS-in-JS 等 blocker 直接 fail fast，而不是继续空口承诺“像素级且可编辑”
+- 新增 [capability-lanes.ts](shared/capability-lanes.ts)，把 `Code -> Design`、`Direct Figma Design`、`Design -> Code` 三条能力线落成共享 contract，避免后续能力继续混层
+- 新增 [code-to-design-snapshot.ts](shared/code-to-design-snapshot.ts)、[code-to-design-plan.ts](shared/code-to-design-plan.ts)、[code-to-design-capture.ts](scripts/code-to-design-capture.ts)、[code-to-design-plan.ts](scripts/code-to-design-plan.ts) 以及 `npm run code-to-design:capture` / `npm run code-to-design:plan`，为本地 Code-to-Design 实验链补上“运行态页面采样 -> Figma command plan”的可执行入口
+- 新增 [code-to-design-runtime-capture.md](doc/plans/code-to-design-runtime-capture.md)，把 Code-to-Design 从 preflight-only 推进到 snapshot / plan / apply 分层主线
+- 新增 `nodes.create-image` capability，并让 [creation-command-handlers.ts](plugins/autodesign/src/runtime/creation-command-handlers.ts) 支持固定宽度文本盒与图片 image-fill 创建，补上 AItest 这类页面的关键写回缺口
+
+### Changed
+
+- [README.md](README.md) 与 [figma-mcp-alignment.md](doc/plans/figma-mcp-alignment.md) 现在把 `runtime:read` 作为正式的本地 runtime read 入口记录下来，便于在 workspace 之外稳定复用 `runtime/*` contract
+- [runtime-read-cli.ts](scripts/runtime-read-cli.ts) 现在拆成“可导入的请求构建层 + 可执行 CLI 入口”，[runtime-read-cli.test.ts](scripts/runtime-read-cli.test.ts) 也补齐了 `get_metadata`、`get_variable_defs`、`get_node_metadata`、`get_screenshot` 的 request contract 与数值校验回归，不再只验证少数 stdout 分支
+- [api-routes.test.ts](server/api-routes.test.ts) 现在补齐了 runtime read API 的关键失败路径回归，包括缺失/未知 `targetSessionId`、多选歧义，以及 stale session 下 live inspect/export 失败后的显式 unavailable fallback，避免这些分支继续只靠手工验证
+- [create-acceptance-report.mjs](scripts/create-acceptance-report.mjs)、[create-acceptance-preflight.mjs](scripts/create-acceptance-preflight.mjs)、[prepare-live-acceptance.test.ts](scripts/prepare-live-acceptance.test.ts) 和 [RUNBOOK.md](reports/acceptance/RUNBOOK.md) 现在补上了 `runtime-read-live` 验收场景，`acceptance:prep` 会连同 `bridge-overview`、`design-context`、`variable-defs`、`node-metadata`、`screenshot` 的 runtime read artifact 一起落盘，live runbook 也新增了对应最小验收步骤
+- [README.md](README.md)、[Roadmap.md](doc/Roadmap.md)、[Test-Standards.md](doc/Test-Standards.md) 和 [code-to-figma-preflight.md](doc/plans/code-to-figma-preflight.md) 现在把 `code-to-figma:preflight` 记录为“源码可逆性审计”而不是 code-to-canvas 主链，避免“可编辑且像素级”承诺继续脱离真实能力边界
+- [code-to-figma-preflight.ts](shared/code-to-figma-preflight.ts) 现在把固定桌面断点下可通过运行态求值解决的模式从 hard blocker 收紧成显式 warning，例如 CSS Grid、`min/calc/clamp`、`@media`、`vh/vw` 和 CSS-in-JS；真正继续阻断的只剩交互 hooks、事件处理器、滤镜/变换等会直接破坏静态可编辑还原的模式
+- [plugin-bridge-cli.ts](scripts/plugin-bridge-cli.ts) 现在支持 `--json-file`，方便直接发送 Code-to-Design 计划产出的批次文件，而不再要求把大 JSON 内联进命令行
+- [plugin-cli-guards.ts](shared/plugin-cli-guards.ts) 与 [plugin-targeting.ts](shared/plugin-targeting.ts) 现在接受“显式 `parentNodeId` 的创建命令”作为外部安全 target，不再错误拦截 parent-addressed creation batch
+- [README.md](README.md)、[Architecture.md](doc/Architecture.md)、[Architecture-Folder-Governance.md](doc/Architecture-Folder-Governance.md)、[Product-Standards.md](doc/Product-Standards.md)、[Roadmap.md](doc/Roadmap.md) 与 [product_boundary_truth.json](config/governance/product_boundary_truth.json) 现在把 Code-to-Design 采样与计划链记录为 experimental，和 Direct Figma Design / Design-to-Code 明确拆线
+
 ## 2026-03-25
 
 ### Added

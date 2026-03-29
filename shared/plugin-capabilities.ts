@@ -1,4 +1,5 @@
 export type PluginCapabilityDomain =
+  | "runtime"
   | "selection"
   | "nodes"
   | "fills-strokes-effects"
@@ -18,6 +19,13 @@ export type PluginCapabilityDomain =
 export type PluginExecutionMode = "strict" | "best-effort";
 
 export type PluginCapabilityPayloadMap = {
+  "runtime.inspect-font-catalog": Record<string, never>;
+  "runtime.probe-font-load": {
+    fonts: Array<{
+      family: string;
+      style?: string;
+    }>;
+  };
   "selection.refresh": Record<string, never>;
   "nodes.inspect-subtree": {
     nodeId: string;
@@ -48,16 +56,22 @@ export type PluginCapabilityPayloadMap = {
   "nodes.frame-selection": { name?: string; padding?: number };
   "layout.configure-frame": {
     layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+    layoutWrap?: "NO_WRAP" | "WRAP";
     primaryAxisSizingMode?: "FIXED" | "AUTO";
     counterAxisSizingMode?: "FIXED" | "AUTO";
     primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
     counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
     itemSpacing?: number;
+    counterAxisSpacing?: number;
     paddingLeft?: number;
     paddingRight?: number;
     paddingTop?: number;
     paddingBottom?: number;
     clipsContent?: boolean;
+    minWidth?: number;
+    maxWidth?: number;
+    minHeight?: number;
+    maxHeight?: number;
   };
   "layout.configure-child": {
     layoutAlign?: "INHERIT" | "STRETCH" | "MIN" | "CENTER" | "MAX";
@@ -79,15 +93,34 @@ export type PluginCapabilityPayloadMap = {
     name?: string;
     content: string;
     fontFamily?: string;
+    fontFamilyCandidates?: string[];
     fontStyle?: string;
+    resolvedBrowserFontFamily?: string;
+    resolvedBrowserFontStyle?: string;
     fontSize?: number;
     fontWeight?: number | string;
     colorHex?: string;
     lineHeight?: number;
     letterSpacing?: number;
     alignment?: "left" | "center" | "right" | "justified";
+    width?: number;
+    height?: number;
+    textAutoResize?: "WIDTH_AND_HEIGHT" | "HEIGHT" | "NONE";
     x?: number;
     y?: number;
+    parentNodeId?: string;
+    analysisRefId?: string;
+  };
+  "nodes.create-image": {
+    name?: string;
+    imageDataUrl: string;
+    width: number;
+    height: number;
+    fitMode?: "cover" | "contain" | "stretch";
+    x?: number;
+    y?: number;
+    opacity?: number;
+    cornerRadius?: number;
     parentNodeId?: string;
     analysisRefId?: string;
   };
@@ -224,6 +257,26 @@ export type PluginCapabilityDescriptor = {
 };
 
 export const IMPLEMENTED_PLUGIN_CAPABILITIES: PluginCapabilityDescriptor[] = [
+  {
+    id: "runtime.inspect-font-catalog",
+    domain: "runtime",
+    label: "Inspect font catalog",
+    description: "Read the fonts currently visible to the active Figma runtime session.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: false,
+    requiresEditAccess: false,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "runtime.probe-font-load",
+    domain: "runtime",
+    label: "Probe font load",
+    description: "Attempt to load exact family/style pairs even when they are absent from the visible runtime catalog.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: false,
+    requiresEditAccess: false,
+    requiresPaidFeature: false,
+  },
   {
     id: "selection.refresh",
     domain: "selection",
@@ -441,6 +494,17 @@ export const IMPLEMENTED_PLUGIN_CAPABILITIES: PluginCapabilityDescriptor[] = [
     label: "Create text",
     description:
       "Create a new text node with specified content on the current page or inside a specified parent.",
+    supportedEditorTypes: ["figma"],
+    requiresSelection: false,
+    requiresEditAccess: true,
+    requiresPaidFeature: false,
+  },
+  {
+    id: "nodes.create-image",
+    domain: "nodes",
+    label: "Create image",
+    description:
+      "Create a new rectangle with an image fill from a data URL inside a specified parent.",
     supportedEditorTypes: ["figma"],
     requiresSelection: false,
     requiresEditAccess: true,

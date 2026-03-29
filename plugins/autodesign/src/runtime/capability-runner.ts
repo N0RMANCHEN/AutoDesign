@@ -102,16 +102,22 @@ function snapshotNodeProperties(
       break;
     case "layout.configure-frame":
       if ("layoutMode" in node) props.layoutMode = node.layoutMode;
+      if ("layoutWrap" in node) props.layoutWrap = node.layoutWrap;
       if ("primaryAxisSizingMode" in node) props.primaryAxisSizingMode = node.primaryAxisSizingMode;
       if ("counterAxisSizingMode" in node) props.counterAxisSizingMode = node.counterAxisSizingMode;
       if ("primaryAxisAlignItems" in node) props.primaryAxisAlignItems = node.primaryAxisAlignItems;
       if ("counterAxisAlignItems" in node) props.counterAxisAlignItems = node.counterAxisAlignItems;
       if ("itemSpacing" in node) props.itemSpacing = node.itemSpacing;
+      if ("counterAxisSpacing" in node) props.counterAxisSpacing = node.counterAxisSpacing;
       if ("paddingLeft" in node) props.paddingLeft = node.paddingLeft;
       if ("paddingRight" in node) props.paddingRight = node.paddingRight;
       if ("paddingTop" in node) props.paddingTop = node.paddingTop;
       if ("paddingBottom" in node) props.paddingBottom = node.paddingBottom;
       if ("clipsContent" in node) props.clipsContent = node.clipsContent;
+      if ("minWidth" in node) props.minWidth = node.minWidth;
+      if ("maxWidth" in node) props.maxWidth = node.maxWidth;
+      if ("minHeight" in node) props.minHeight = node.minHeight;
+      if ("maxHeight" in node) props.maxHeight = node.maxHeight;
       break;
     case "layout.configure-child":
       if ("layoutAlign" in node) props.layoutAlign = node.layoutAlign;
@@ -278,8 +284,8 @@ async function getTargetNodes(
   command: FigmaCapabilityCommand,
   batchSource?: string,
 ): Promise<ReturnType<typeof getSelection>> {
-  const selection = getSelection();
   if (!command.nodeIds || command.nodeIds.length === 0) {
+    const selection = getSelection();
     if (
       batchSource === "codex" &&
       requiresExplicitNodeIdsForExternalCapability(command.capabilityId)
@@ -292,6 +298,7 @@ async function getTargetNodes(
   }
   const resolvedNodeIds = command.nodeIds.map((nodeId) => resolveBatchNodeId(activeBatchContext, nodeId));
   const idSet = new Set(resolvedNodeIds);
+  const selection = figma.currentPage.selection;
   const filtered = selection.filter((node: (typeof selection)[number]) => idSet.has(node.id));
   if (filtered.length) {
     return filtered;

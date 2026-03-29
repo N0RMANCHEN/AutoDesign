@@ -85,3 +85,31 @@ test("create_acceptance_report supports reconstruction live presets and rejects 
     );
   });
 });
+
+test("create_acceptance_report supports the runtime read live preset", async () => {
+  await withTempRoot(async (tempRoot) => {
+    const timestamp = "20260323-231000";
+    await execFileAsync(
+      process.execPath,
+      [scriptPath, "--timestamp", timestamp, "--scenario", "runtime-read-live", "--owner", "hirohi"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          AUTODESIGN_REPORT_ROOT: tempRoot,
+        },
+      },
+    );
+
+    const jsonPath = path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.json`);
+    const markdownPath = path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.md`);
+    const payload = JSON.parse(await readFile(jsonPath, "utf8"));
+    const markdown = await readFile(markdownPath, "utf8");
+
+    assert.equal(payload.owner, "hirohi");
+    assert.equal(payload.scope, "Runtime read live acceptance");
+    assert.match(payload.commands[0], /runtime:read -- bridge_overview/);
+    assert.match(payload.commands[4], /runtime:read -- get_screenshot/);
+    assert.match(markdown, /Validate runtime read contracts and CLI entrypoints/);
+  });
+});

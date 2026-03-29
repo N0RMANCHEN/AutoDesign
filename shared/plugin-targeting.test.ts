@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   collectCapabilityIds,
   collectMutatingCapabilityIds,
+  hasExplicitCreationParentTarget,
   normalizeLegacyCommandForExternalDispatch,
   prepareBatchForExternalDispatch,
   requiresExplicitNodeIdsForExternalCapability,
@@ -14,6 +15,32 @@ test("mutating capabilities require explicit nodeIds while read-only capabilitie
   assert.equal(requiresExplicitNodeIdsForExternalCapability("fills.set-fill"), true);
   assert.equal(requiresExplicitNodeIdsForExternalCapability("selection.refresh"), false);
   assert.equal(requiresExplicitNodeIdsForExternalCapability("nodes.inspect-subtree"), false);
+  assert.equal(requiresExplicitNodeIdsForExternalCapability("runtime.inspect-font-catalog"), false);
+  assert.equal(requiresExplicitNodeIdsForExternalCapability("runtime.probe-font-load"), false);
+});
+
+test("hasExplicitCreationParentTarget accepts parent-addressed creation commands", () => {
+  assert.equal(
+    hasExplicitCreationParentTarget({
+      type: "capability",
+      capabilityId: "nodes.create-image",
+      payload: {
+        imageDataUrl: "data:image/png;base64,AAAA",
+        width: 120,
+        height: 80,
+        parentNodeId: "1:2",
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    hasExplicitCreationParentTarget({
+      type: "capability",
+      capabilityId: "fills.set-fill",
+      payload: { hex: "#111111", parentNodeId: "1:2" },
+    } as any),
+    false,
+  );
 });
 
 test("prepareBatchForExternalDispatch normalizes legacy mutating commands and injects batch nodeIds", () => {
@@ -99,6 +126,18 @@ test("collectCapabilityIds and collectMutatingCapabilityIds normalize legacy com
       },
       {
         type: "capability",
+        capabilityId: "runtime.inspect-font-catalog",
+        payload: {},
+      },
+      {
+        type: "capability",
+        capabilityId: "runtime.probe-font-load",
+        payload: {
+          fonts: [{ family: "Didot", style: "Bold" }],
+        },
+      },
+      {
+        type: "capability",
         capabilityId: "fills.set-fill",
         payload: { hex: "#111111" },
       },
@@ -108,6 +147,8 @@ test("collectCapabilityIds and collectMutatingCapabilityIds normalize legacy com
   assert.deepEqual(collectCapabilityIds(batch).sort(), [
     "fills.set-fill",
     "nodes.inspect-subtree",
+    "runtime.inspect-font-catalog",
+    "runtime.probe-font-load",
     "selection.refresh",
   ]);
   assert.deepEqual(collectMutatingCapabilityIds(batch), ["fills.set-fill"]);

@@ -13,7 +13,6 @@ import { nowIso } from "../shared/utils.js";
 import { resolveDataDirectory } from "./runtime-paths.js";
 
 const sessionFreshnessMs = 45_000;
-const serverStartedAtMs = Date.now();
 
 const emptySnapshot: PluginBridgeSnapshot = {
   sessions: [],
@@ -162,8 +161,7 @@ function normalizeVariables(variables: PluginBridgeSession["variables"]) {
 
 function withSessionStatus(session: PluginBridgeSession): PluginBridgeSession {
   const lastSeen = new Date(session.lastSeenAt).getTime();
-  const seenByCurrentServer = Number.isFinite(lastSeen) && lastSeen >= serverStartedAtMs;
-  const isFresh = seenByCurrentServer && Date.now() - lastSeen <= sessionFreshnessMs;
+  const isFresh = Number.isFinite(lastSeen) && Date.now() - lastSeen <= sessionFreshnessMs;
 
   return {
     ...session,

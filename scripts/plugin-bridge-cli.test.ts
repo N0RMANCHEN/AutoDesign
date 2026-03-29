@@ -404,6 +404,139 @@ test("plugin_bridge_cli send normalizes a legacy mutating command and queues it 
   });
 });
 
+test("plugin_bridge_cli send can wait for a completed command record", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "fills.set-fill" }],
+          selection: [
+            {
+              id: "1:2",
+              name: "Card",
+              type: "FRAME",
+              fills: ["#FFFFFF"],
+              fillStyleId: null,
+            },
+          ],
+        },
+      ],
+      commands: [
+        {
+          id: "cmd_wait",
+          targetSessionId: "session_1",
+          source: "codex",
+          payload: {
+            source: "codex",
+            commands: [],
+          },
+          status: "succeeded",
+          createdAt: "2026-03-23T12:00:00.000Z",
+          claimedAt: "2026-03-23T12:00:01.000Z",
+          completedAt: "2026-03-23T12:00:02.000Z",
+          resultMessage: "all commands succeeded",
+          results: [
+            {
+              capabilityId: "fills.set-fill",
+              ok: true,
+              changedNodeIds: ["1:2"],
+              createdStyleIds: [],
+              createdVariableIds: [],
+              exportedImages: [],
+              inspectedNodes: [],
+              warnings: [],
+              errorCode: null,
+              message: "fill updated",
+            },
+          ],
+        },
+      ],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_wait",
+    });
+
+    const batch = JSON.stringify({
+      source: "user",
+      commands: [
+        {
+          type: "set-selection-fill",
+          hex: "#00FF88",
+        },
+      ],
+    });
+    const { stdout } = await runCli(["send", "--json", batch, "--node-ids", "1:2", "--wait"], fixtureDir);
+
+    assert.match(stdout, /queued: cmd_wait/);
+    assert.match(stdout, /status: succeeded/);
+    assert.match(stdout, /result: all commands succeeded/);
+    assert.match(stdout, /results:\n- \[0\] fills\.set-fill ok=yes changed=1 warnings=0 receipts=0 exports=0 inspected=0/);
+  });
+});
+
+test("plugin_bridge_cli send accepts a JSON batch file path", async () => {
+  await withFixtureDir(async (fixtureDir) => {
+    await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {
+      sessions: [
+        {
+          id: "session_1",
+          label: "AutoDesign",
+          pluginVersion: "0.2.0",
+          editorType: "figma",
+          fileName: "Demo File",
+          pageName: "Page A",
+          status: "online",
+          lastSeenAt: "2026-03-23T12:00:00.000Z",
+          lastHandshakeAt: "2026-03-23T12:00:00.000Z",
+          runtimeFeatures: { supportsExplicitNodeTargeting: true },
+          capabilities: [{ id: "nodes.create-frame" }, { id: "nodes.create-text" }],
+          selection: [],
+        },
+      ],
+      commands: [],
+    });
+    await writeFixture(fixtureDir, "post__api__plugin-bridge__commands.json", {
+      id: "cmd_from_file",
+    });
+
+    const batchPath = path.join(fixtureDir, "batch.json");
+    await writeFile(
+      batchPath,
+      JSON.stringify({
+        source: "codex",
+        commands: [
+          {
+            type: "capability",
+            capabilityId: "nodes.create-frame",
+            payload: {
+              name: "Page Root",
+              width: 1440,
+              height: 2200,
+              parentNodeId: "1:2",
+            },
+          },
+        ],
+      }, null, 2),
+      "utf8",
+    );
+
+    const { stdout } = await runCli(["send", "--json-file", batchPath], fixtureDir);
+    assert.match(stdout, /queued: cmd_from_file/);
+    assert.match(stdout, /"capabilityId": "nodes\.create-frame"/);
+    assert.match(stdout, /"parentNodeId": "1:2"/);
+  });
+});
+
 test("plugin_bridge_cli send allows read-only commands without explicit nodeIds", async () => {
   await withFixtureDir(async (fixtureDir) => {
     await writeFixture(fixtureDir, "get__api__plugin-bridge.json", {

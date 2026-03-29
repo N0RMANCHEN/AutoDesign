@@ -15,7 +15,7 @@ type AssetCommandDeps = {
   successResult: SuccessResultFactory;
 };
 
-function decodeDataUrl(dataUrl: string) {
+export function decodeDataUrl(dataUrl: string) {
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
   if (!match) {
     throw new Error("图片 dataUrl 格式无效。");

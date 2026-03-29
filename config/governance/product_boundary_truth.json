@@ -24,6 +24,11 @@
         "id": "runtime_ai_workbench",
         "label": "Runtime AI 测试台与本地 `Context Pack -> action` 模拟链",
         "surfaceClass": "experimental"
+      },
+      {
+        "id": "code_to_design_runtime_capture",
+        "label": "`code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链",
+        "surfaceClass": "experimental"
       }
     ],
     "futureTarget": [
@@ -46,17 +51,17 @@
   },
   "copy": {
     "readmeFormalSupport": "**Formal support now**: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链。",
-    "readmeExperimental": "**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链。",
+    "readmeExperimental": "**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链。",
     "readmeFutureTarget": "**Future target**: 生产级自动 React 生成、MCP 主写回、SaaS 化能力。",
-    "boundarySummary": "工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。",
-    "roadmapSupportBoundary": "- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
+    "boundarySummary": "工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。",
+    "roadmapSupportBoundary": "- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
   },
   "docAssertions": [
     {
       "doc": "README.md",
       "snippets": [
         "**Formal support now**: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链。",
-        "**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链。",
+        "**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链。",
         "**Future target**: 生产级自动 React 生成、MCP 主写回、SaaS 化能力。"
       ]
     },
@@ -64,13 +69,13 @@
       "doc": "doc/Product-Standards.md",
       "snippets": [
         "- Boundary truth source: `config/governance/product_boundary_truth.json`",
-        "- 当前边界摘要：工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
+        "- 当前边界摘要：工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
       ]
     },
     {
       "doc": "doc/Roadmap.md",
       "snippets": [
-        "- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
+        "- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。"
       ]
     }
   ]

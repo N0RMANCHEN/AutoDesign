@@ -207,16 +207,22 @@ export function configureFrameLayout(
   node: any,
   payload: {
     layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+    layoutWrap?: "NO_WRAP" | "WRAP";
     primaryAxisSizingMode?: "FIXED" | "AUTO";
     counterAxisSizingMode?: "FIXED" | "AUTO";
     primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
     counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
     itemSpacing?: number;
+    counterAxisSpacing?: number;
     paddingLeft?: number;
     paddingRight?: number;
     paddingTop?: number;
     paddingBottom?: number;
     clipsContent?: boolean;
+    minWidth?: number;
+    maxWidth?: number;
+    minHeight?: number;
+    maxHeight?: number;
   },
 ) {
   if (!node || !("layoutMode" in node)) {
@@ -225,6 +231,12 @@ export function configureFrameLayout(
 
   if (payload.layoutMode) {
     node.layoutMode = payload.layoutMode;
+  }
+  if (payload.layoutWrap) {
+    if (!("layoutWrap" in node)) {
+      throw new Error("当前 Figma 运行时不支持 layoutWrap。");
+    }
+    node.layoutWrap = payload.layoutWrap;
   }
   if (payload.primaryAxisSizingMode) {
     node.primaryAxisSizingMode = payload.primaryAxisSizingMode;
@@ -244,6 +256,15 @@ export function configureFrameLayout(
     }
     node.itemSpacing = Number(payload.itemSpacing);
   }
+  if (payload.counterAxisSpacing !== undefined) {
+    if (!("counterAxisSpacing" in node)) {
+      throw new Error("当前 Figma 运行时不支持 counterAxisSpacing。");
+    }
+    if (!Number.isFinite(payload.counterAxisSpacing)) {
+      throw new Error("counterAxisSpacing 必须是有效数字。");
+    }
+    node.counterAxisSpacing = Number(payload.counterAxisSpacing);
+  }
   for (const key of ["paddingLeft", "paddingRight", "paddingTop", "paddingBottom"] as const) {
     const value = payload[key];
     if (value === undefined) {
@@ -256,6 +277,19 @@ export function configureFrameLayout(
   }
   if (payload.clipsContent !== undefined && supportsClipsContent(node)) {
     node.clipsContent = Boolean(payload.clipsContent);
+  }
+  for (const key of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) {
+    const value = payload[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (!(key in node)) {
+      throw new Error(`当前 Figma 运行时不支持 ${key}。`);
+    }
+    if (!Number.isFinite(value) || Number(value) <= 0) {
+      throw new Error(`${key} 必须是大于 0 的数字。`);
+    }
+    node[key] = Number(value);
   }
 }
 

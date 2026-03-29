@@ -1,4 +1,7 @@
 import type {
+  PluginBridgeCommandRecord,
+  PluginBridgeSession,
+  PluginBridgeSyncResponse,
   PluginCommandExecutionResult,
   PluginSessionRegistrationPayload,
 } from "../../../shared/plugin-bridge.js";
@@ -13,22 +16,22 @@ import { readLocalStyleSnapshot } from "./runtime/style-snapshot.js";
 import { readLocalVariableSnapshot } from "./runtime/variable-snapshot.js";
 
 const PLUGIN_LABEL = "AutoDesign";
-const PLUGIN_VERSION = "0.2.3";
+const PLUGIN_VERSION = "0.2.9";
 const BRIDGE_URL = "http://localhost:3001/api/plugin-bridge";
 const UI_WIDTH = 244;
 const UI_HEIGHT = 116;
-const POLL_INTERVAL_MS = 1500;
-const HEARTBEAT_INTERVAL_MS = 5000;
+const COMMAND_SYNC_INTERVAL_MS = 1500;
+const HEARTBEAT_INTERVAL_MS = 10000;
 
 type BridgeUiState = "connecting" | "online" | "offline" | "error";
 
 let pluginSessionId: string | null = null;
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let commandSyncTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let selectionSummaryRequestId = 0;
 let isRegistering = false;
 let isHeartbeating = false;
-let isPolling = false;
+let isExecutingBridgeCommand = false;
 let lastBridgeStatusKey = "";
 
 figma.showUI(__html__, {
@@ -112,7 +115,29 @@ function postCommandResult(
   });
 }
 
-async function sessionPayload(): Promise<PluginSessionRegistrationPayload> {
+async function sessionPayload(options?: {
+  claimCommand?: boolean;
+  includeContextSnapshots?: boolean;
+}): Promise<PluginSessionRegistrationPayload> {
+  const claimCommand = options?.claimCommand === true;
+  const includeContextSnapshots = options?.includeContextSnapshots !== false;
+  const payload: PluginSessionRegistrationPayload = {
+    sessionId: pluginSessionId || undefined,
+    label: PLUGIN_LABEL,
+    pluginVersion: PLUGIN_VERSION,
+    editorType: figma.editorType,
+    fileName: figma.root.name || "Untitled",
+    pageName: figma.currentPage.name || "Page",
+    runtimeFeatures: getRuntimeFeatures(),
+    capabilities: getRuntimeCapabilities(),
+    selection: await readSelectionSummary(),
+    ...(claimCommand ? { claimCommand: true } : {}),
+  };
+
+  if (!includeContextSnapshots) {
+    return payload;
+  }
+
   const [styleSnapshot, variableSnapshot] = await Promise.all([
     readLocalStyleSnapshot().catch((error) => {
       postExecutionError(describeError(error, "Style snapshot failed."));
@@ -132,21 +157,13 @@ async function sessionPayload(): Promise<PluginSessionRegistrationPayload> {
   ]);
 
   return {
-    sessionId: pluginSessionId || undefined,
-    label: PLUGIN_LABEL,
-    pluginVersion: PLUGIN_VERSION,
-    editorType: figma.editorType,
-    fileName: figma.root.name || "Untitled",
-    pageName: figma.currentPage.name || "Page",
-    runtimeFeatures: getRuntimeFeatures(),
-    capabilities: getRuntimeCapabilities(),
-    selection: await readSelectionSummary(),
+    ...payload,
     ...styleSnapshot,
     ...variableSnapshot,
   };
 }
 
-async function bridgeFetch(pathname: string, init?: RequestInit) {
+async function bridgeFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
   const requestInit = Object.assign({}, init || {});
   requestInit.headers = Object.assign(
     {
@@ -160,7 +177,62 @@ async function bridgeFetch(pathname: string, init?: RequestInit) {
     throw new Error(`Bridge request failed: ${response.status}`);
   }
 
-  return response.json();
+  return (await response.json()) as T;
+}
+
+function parseBridgeSyncResponse(
+  payload: PluginBridgeSession | PluginBridgeSyncResponse,
+) {
+  if ("session" in payload) {
+    return payload;
+  }
+  return {
+    session: payload,
+    command: null,
+  } satisfies PluginBridgeSyncResponse;
+}
+
+async function executeBridgeCommand(command: PluginBridgeCommandRecord | null) {
+  if (!command) {
+    return;
+  }
+
+  isExecutingBridgeCommand = true;
+  try {
+    const result = await runCommands(command.payload);
+    try {
+      await reportCommandResult(command.id, result.message, result.ok, result.results);
+    } catch (error) {
+      pluginSessionId = null;
+      postBridgeStatus("offline", describeError(error, "Bridge result reporting failed"), null);
+    }
+  } catch (error) {
+    const detail = describeError(error, "未知错误");
+    postExecutionError(detail);
+    postCommandResult(detail, false, []);
+    try {
+      await reportCommandResult(command.id, detail, false, []);
+    } catch (reportError) {
+      pluginSessionId = null;
+      postBridgeStatus(
+        "offline",
+        describeError(reportError, "Bridge result reporting failed"),
+        null,
+      );
+    }
+  } finally {
+    isExecutingBridgeCommand = false;
+  }
+}
+
+async function handleBridgeSyncResponse(
+  payload: PluginBridgeSession | PluginBridgeSyncResponse,
+) {
+  const response = parseBridgeSyncResponse(payload);
+  pluginSessionId = response.session.id;
+  postBridgeStatus("online", `Bridge online: ${response.session.id}`, response.session);
+  await executeBridgeCommand(response.command);
+  return response.session;
 }
 
 async function registerBridgeSession() {
@@ -172,14 +244,16 @@ async function registerBridgeSession() {
   postBridgeStatus("connecting", "正在连接本地 bridge…", null);
 
   try {
-    const session = await bridgeFetch("/sessions/register", {
+    const response = await bridgeFetch<PluginBridgeSession | PluginBridgeSyncResponse>("/sessions/register", {
       method: "POST",
-      body: JSON.stringify(await sessionPayload()),
+      body: JSON.stringify(
+        await sessionPayload({
+          claimCommand: true,
+          includeContextSnapshots: true,
+        }),
+      ),
     });
-
-    pluginSessionId = session.id;
-    postBridgeStatus("online", `Bridge online: ${session.id}`, session);
-    return session;
+    return await handleBridgeSyncResponse(response);
   } catch (error) {
     pluginSessionId = null;
     postBridgeStatus("offline", describeError(error, "Bridge connect failed"), null);
@@ -189,7 +263,10 @@ async function registerBridgeSession() {
   }
 }
 
-async function heartbeatBridgeSession() {
+async function heartbeatBridgeSession(options?: {
+  claimCommand?: boolean;
+  includeContextSnapshots?: boolean;
+}) {
   if (!pluginSessionId) {
     return registerBridgeSession();
   }
@@ -201,13 +278,14 @@ async function heartbeatBridgeSession() {
   isHeartbeating = true;
 
   try {
-    const session = await bridgeFetch(`/sessions/${pluginSessionId}/heartbeat`, {
+    const response = await bridgeFetch<PluginBridgeSession | PluginBridgeSyncResponse>(
+      `/sessions/${pluginSessionId}/heartbeat`,
+      {
       method: "POST",
-      body: JSON.stringify(await sessionPayload()),
-    });
-    pluginSessionId = session.id;
-    postBridgeStatus("online", `Bridge online: ${session.id}`, session);
-    return session;
+        body: JSON.stringify(await sessionPayload(options)),
+      },
+    );
+    return await handleBridgeSyncResponse(response);
   } catch (error) {
     pluginSessionId = null;
     postBridgeStatus("offline", describeError(error, "Bridge heartbeat failed"), null);
@@ -239,7 +317,10 @@ async function reportCommandResult(
 
 async function syncBridgeSession() {
   if (pluginSessionId) {
-    return heartbeatBridgeSession();
+    return heartbeatBridgeSession({
+      claimCommand: !isExecutingBridgeCommand,
+      includeContextSnapshots: false,
+    });
   }
 
   return registerBridgeSession();
@@ -253,60 +334,9 @@ async function runCommands(batch: FigmaPluginCommandBatch) {
   return result;
 }
 
-async function pollBridgeCommands() {
-  if (!pluginSessionId || isPolling) {
-    return;
-  }
-
-  isPolling = true;
-
-  try {
-    const response = await bridgeFetch(`/sessions/${pluginSessionId}/commands/next`, {
-      method: "GET",
-    });
-    const command = response.command;
-    if (!command) {
-      return;
-    }
-
-    try {
-      const result = await runCommands(command.payload);
-      try {
-        await reportCommandResult(command.id, result.message, result.ok, result.results);
-      } catch (error) {
-        pluginSessionId = null;
-        postBridgeStatus("offline", describeError(error, "Bridge result reporting failed"), null);
-      }
-    } catch (error) {
-      const detail = describeError(error, "未知错误");
-      postExecutionError(detail);
-      postCommandResult(detail, false, []);
-      try {
-        await reportCommandResult(command.id, detail, false, []);
-      } catch (reportError) {
-        pluginSessionId = null;
-        postBridgeStatus(
-          "offline",
-          describeError(reportError, "Bridge result reporting failed"),
-          null,
-        );
-      }
-    }
-  } catch (error) {
-    pluginSessionId = null;
-    postBridgeStatus(
-      "offline",
-      describeError(error, "Bridge polling failed"),
-      null,
-    );
-  } finally {
-    isPolling = false;
-  }
-}
-
 function startBridgeLoop() {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer);
+  if (commandSyncTimer !== null) {
+    clearInterval(commandSyncTimer);
   }
   if (heartbeatTimer !== null) {
     clearInterval(heartbeatTimer);
@@ -314,19 +344,25 @@ function startBridgeLoop() {
 
   void syncBridgeSession();
 
-  pollTimer = setInterval(() => {
-    void pollBridgeCommands();
-  }, POLL_INTERVAL_MS);
+  commandSyncTimer = setInterval(() => {
+    void syncBridgeSession();
+  }, COMMAND_SYNC_INTERVAL_MS);
 
   heartbeatTimer = setInterval(() => {
-    void syncBridgeSession();
+    void heartbeatBridgeSession({
+      claimCommand: !isExecutingBridgeCommand,
+      includeContextSnapshots: true,
+    });
   }, HEARTBEAT_INTERVAL_MS);
 }
 
 figma.on("selectionchange", () => {
   void postSelectionSummary("已同步当前 selection。");
   if (pluginSessionId) {
-    void heartbeatBridgeSession();
+    void heartbeatBridgeSession({
+      claimCommand: false,
+      includeContextSnapshots: false,
+    });
   }
 });
 

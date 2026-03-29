@@ -68,7 +68,25 @@
 - render / measure 产物完整
 - diff metrics 与肉眼观察没有明显冲突
 
-## 5. 什么时候叫用户配合
+## 5. runtime-read-live 最小验收
+
+按这个顺序做：
+
+1. `npm run runtime:read -- bridge_overview`
+2. `npm run runtime:read -- get_design_context --session <SESSION_ID>`
+3. `npm run runtime:read -- get_variable_defs --session <SESSION_ID>`
+4. `npm run runtime:read -- get_node_metadata --session <SESSION_ID> --node-id <NODE_ID>`
+5. `npm run runtime:read -- get_screenshot --session <SESSION_ID> --node-id <NODE_ID> --allow-live-export --out <PNG_PATH>`
+
+人工确认点：
+
+- `bridge_overview` 的 session/file/page 与当前 live 文件一致
+- `design-context` 里的 `pluginSelection`、`variableDefs` 和当前 selection 没有串位
+- `node-metadata` 里的节点 id、binding 和当前目标节点一致
+- `get_screenshot` 导出的图片或 unavailable note 与当前节点真实状态一致
+- 整个过程中 session 没有掉线，也没有出现 stale session 误判
+
+## 6. 什么时候叫用户配合
 
 只有这几种情况需要用户参与：
 
@@ -78,7 +96,7 @@
 
 如果只是本地脚本、报告生成、artifact 导出或 HTTP/CLI 校验，不需要用户介入。
 
-## 6. 验收后要补什么
+## 7. 验收后要补什么
 
 - 把结果回填到对应 `acceptance-<timestamp>.md`
 - 把 `acceptance-<timestamp>.md + .json` 的状态从 `PENDING` 更新成 `PASS` 或 `FAIL`

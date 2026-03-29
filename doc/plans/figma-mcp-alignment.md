@@ -36,6 +36,7 @@
 - `doc/Product-Standards.md`
 - `doc/Roadmap.md`
 - `doc/Capability-Catalog.md`
+- `scripts/runtime-read-cli.ts`
 - `shared/plugin-capabilities.ts`
 - `src/` workspace context pack / component mapping
 - `server/` bridge routes and storage
@@ -84,5 +85,6 @@
 
 - `npm run verify:docs`
 - `npm run check:report-schemas`
+- `npm run runtime:read -- get_design_context --selection-ids mapping-button-primary`
 - 涉及 capability catalog 或 shared contract 时，补 `npm run test:unit`
 - 涉及目录职责、truth store owner 或 plugin runtime 写面时，补 `npm run governance:check`

@@ -1,9 +1,13 @@
 # AutoDesign
 
-`AutoDesign` 是一个面向个人工作流的 Figma + React 联调仓库，目标固定为两件事：
+`AutoDesign` 是一个面向个人工作流的 Figma + React 联调仓库，围绕三条能力线推进：
 
-1. 让 AI 通过本地插件和 bridge 安全读取、分析、修改 Figma。
-2. 让 Figma 中已经确认的设计事实，稳定转成前端改造输入。
+1. `Code -> Design`
+   让前端代码或运行态页面被采样、规划并还原成可编辑 Figma。
+2. `Direct Figma Design`
+   让 AI 通过本地插件和 bridge 安全读取、分析、修改 Figma。
+3. `Design -> Code`
+   让 Figma 中已经确认的设计事实，稳定转成前端改造输入。
 
 它不是成品 SaaS，不是插件商店产品，也不是“一键生成生产代码”的黑盒系统。
 
@@ -56,9 +60,9 @@ npm run build:plugins
 - 正式插件：`plugins/autodesign/dist/manifest.json`
 - Smoke 插件：`plugins/autodesign-smoke/dist/manifest.json`
 
-## 两条主工作流
+## 三条能力线
 
-### AI -> Figma
+### Direct Figma Design
 
 常用命令：
 
@@ -72,7 +76,7 @@ npm run plugin:reconstruct
 
 这条链路的正式写回主链是 `Plugin API + localhost bridge`。
 
-### Figma -> AI -> React
+### Design -> Code
 
 当前主链仍以上下文整理和受控改造为主：
 
@@ -80,13 +84,54 @@ npm run plugin:reconstruct
 - 构造 Runtime Context Pack
 - 为 AI 修改前端代码提供更稳定输入
 
-当前还没有生产级的“全自动 React 生成”主链。
+本地 runtime read 入口：
+
+```bash
+npm run runtime:read -- bridge_overview
+npm run runtime:read -- get_design_context --selection-ids mapping-button-primary --session session_test
+npm run runtime:read -- get_variable_defs --selection-ids mapping-button-primary --session session_test
+npm run runtime:read -- get_screenshot --session session_test --node-id reference-1 --out data/runtime/reference-1.png
+```
+
+### Code -> Design
+
+当前本地链路已经拆成 `preflight -> capture -> plan -> plugin apply` 四段，其中前两段和计划生成已落地，本仓库不会再通过修改目标项目源码来“伪通过”。
+
+前端代码到 Figma 的可逆性预检入口：
+
+```bash
+npm run code-to-figma:preflight -- --project ../AItest --entry src/App.tsx --allow-blocked
+```
+
+运行态页面采样入口：
+
+```bash
+npm run code-to-design:capture -- --project ../AItest --dist ../AItest/dist --entry src/App.tsx --out data/aitest-snapshot.json --screenshot-out data/aitest-page.png
+```
+
+Figma 命令计划入口：
+
+```bash
+npm run code-to-design:plan -- --snapshot data/aitest-snapshot.json --parent-node-id 1:2 --out data/aitest-batch.json --format json
+```
+
+批次写回时，`plugin:send` 现在支持直接读取 JSON 文件：
+
+```bash
+npm run plugin:send -- --json-file data/aitest-batch.json
+```
+
+`code-to-figma:preflight` 只审计“当前页面是否落在可编辑、桌面端、禁止降级的可逆子集里”；`code-to-design:capture` 负责拿浏览器运行态设计事实；`code-to-design:plan` 负责把 snapshot 展开为可执行的 Figma capability batch。
+
+当前还没有 production-grade 的“任意 React 全自动还原”主链，但已经有本地可执行的 Code-to-Design 采样与计划链。
 
 ## 当前支持边界
 
 **Formal support now**: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链。
 
-**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链。
+**Experimental**: `plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链。
+
+**Exploratory guardrail**: `code-to-figma:preflight` 只做源码可逆性审计，用于阻断不可能完成的“可编辑且像素级”承诺；它不是 code-to-canvas 生成主链。
 
 **Future target**: 生产级自动 React 生成、MCP 主写回、SaaS 化能力。
 

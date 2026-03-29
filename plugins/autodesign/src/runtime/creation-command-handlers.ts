@@ -9,6 +9,7 @@ import {
   supportsPosition,
 } from "./node-style-helpers.js";
 import { normalizeFontWeightStyle, normalizeTextAlignment } from "./text-style-helpers.js";
+import { decodeDataUrl } from "./asset-reconstruction-command-handlers.js";
 
 type SuccessResultFactory = (
   capabilityId: FigmaCapabilityCommand["capabilityId"],
@@ -27,6 +28,7 @@ type CreationCommandDeps = {
 export const CREATION_CAPABILITIES = new Set<string>([
   "nodes.create-frame",
   "nodes.create-text",
+  "nodes.create-image",
   "nodes.create-rectangle",
   "nodes.create-ellipse",
   "nodes.create-line",
@@ -46,6 +48,363 @@ export function hasExplicitCreationParent(command: FigmaCapabilityCommand) {
       ? (command.payload as { parentNodeId?: unknown })
       : null;
   return typeof payload?.parentNodeId === "string" && payload.parentNodeId.trim().length > 0;
+}
+
+export function resolveTextBoxMode(params: {
+  width?: number;
+  height?: number;
+  textAutoResize?: "WIDTH_AND_HEIGHT" | "HEIGHT" | "NONE";
+}) {
+  const hasWidth = Number.isFinite(params.width) && Number(params.width) > 0;
+  const hasHeight = Number.isFinite(params.height) && Number(params.height) > 0;
+  if (params.textAutoResize) {
+    return params.textAutoResize;
+  }
+  if (hasWidth && hasHeight) {
+    return "NONE" as const;
+  }
+  if (hasWidth) {
+    return "HEIGHT" as const;
+  }
+  return null;
+}
+
+export function normalizeImageFitMode(value: unknown) {
+  return value === "contain" || value === "stretch" ? value : "cover";
+}
+
+export function resolveImagePaintScaleMode(value: unknown) {
+  return normalizeImageFitMode(value) === "contain" ? "FIT" : "FILL";
+}
+
+const GENERIC_FONT_FAMILIES = new Set([
+  "cursive",
+  "emoji",
+  "fangsong",
+  "fantasy",
+  "math",
+  "monospace",
+  "sans-serif",
+  "serif",
+  "system-ui",
+  "ui-monospace",
+  "ui-rounded",
+  "ui-sans-serif",
+  "ui-serif",
+]);
+
+function pushUnique(values: string[], seen: Set<string>, value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return;
+  }
+  const key = normalized.toLowerCase();
+  if (seen.has(key)) {
+    return;
+  }
+  values.push(normalized);
+  seen.add(key);
+}
+
+export function resolveFontFamilyCandidates(primaryFamily?: string, fallbackFamilies?: string[]) {
+  const families: string[] = [];
+  const seen = new Set<string>();
+  for (const family of [primaryFamily, ...(fallbackFamilies || [])]) {
+    const normalized = String(family || "").trim();
+    if (!normalized || GENERIC_FONT_FAMILIES.has(normalized.toLowerCase())) {
+      continue;
+    }
+    pushUnique(families, seen, normalized);
+  }
+  if (!families.length) {
+    families.push("Inter");
+  }
+  return families;
+}
+
+function fontWeightStyleCandidates(value: number | string | undefined) {
+  if (value === undefined || value === null) {
+    return ["Regular", "Roman"];
+  }
+  const normalizedWeight =
+    typeof value === "number" ? value : Number.isFinite(Number(value)) ? Number(value) : null;
+  if (normalizedWeight !== null) {
+    if (normalizedWeight >= 800) {
+      return ["Extra Bold", "ExtraBold", "Bold"];
+    }
+    if (normalizedWeight >= 700) {
+      return ["Bold", "Semibold", "Semi Bold", "Regular"];
+    }
+    if (normalizedWeight >= 600) {
+      return ["Semibold", "Semi Bold", "Bold", "Regular"];
+    }
+    if (normalizedWeight >= 500) {
+      return ["Medium", "Regular", "Roman"];
+    }
+    if (normalizedWeight >= 400) {
+      return ["Regular", "Roman", "Book"];
+    }
+    return ["Light", "Regular", "Roman"];
+  }
+
+  try {
+    const normalizedStyle = String(normalizeFontWeightStyle(value));
+    if (/semi\s*bold/i.test(normalizedStyle)) {
+      return ["Semibold", "Semi Bold", "Bold", "Regular"];
+    }
+    if (/extra\s*bold/i.test(normalizedStyle)) {
+      return ["Extra Bold", "ExtraBold", "Bold"];
+    }
+    if (/bold/i.test(normalizedStyle)) {
+      return ["Bold", "Semibold", "Semi Bold", "Regular"];
+    }
+    if (/medium/i.test(normalizedStyle)) {
+      return ["Medium", "Regular", "Roman"];
+    }
+    if (/light/i.test(normalizedStyle)) {
+      return ["Light", "Regular", "Roman"];
+    }
+  } catch {
+    // fall through to raw style aliases below
+  }
+
+  return ["Regular", "Roman", "Book"];
+}
+
+function fontStyleAliases(value: string | undefined) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return [];
+  }
+  if (/semi\s*bold/i.test(normalized)) {
+    return ["Semibold", "Semi Bold", "Bold", "Regular"];
+  }
+  if (/extra\s*bold/i.test(normalized)) {
+    return ["Extra Bold", "ExtraBold", "Bold"];
+  }
+  if (/bold/i.test(normalized)) {
+    return ["Bold", "Semibold", "Semi Bold", "Regular"];
+  }
+  if (/medium/i.test(normalized)) {
+    return ["Medium", "Regular", "Roman"];
+  }
+  if (/regular|normal/i.test(normalized)) {
+    return ["Regular", "Roman", "Book"];
+  }
+  if (/roman/i.test(normalized)) {
+    return ["Roman", "Regular", "Book"];
+  }
+  if (/light/i.test(normalized)) {
+    return ["Light", "Regular", "Roman"];
+  }
+  return [normalized];
+}
+
+function normalizeComparableFontStyle(value: string | undefined) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "");
+}
+
+function normalizeComparableFontFamily(value: string | undefined) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "");
+}
+
+function normalizeStrictFontStyleKey(value: string | undefined) {
+  const normalized = normalizeComparableFontStyle(value);
+  if (!normalized || normalized === "regular" || normalized === "roman" || normalized === "normal" || normalized === "book") {
+    return "regular";
+  }
+  if (normalized === "semibold" || normalized === "semibd") {
+    return "semibold";
+  }
+  if (normalized === "bold") {
+    return "bold";
+  }
+  if (normalized === "medium") {
+    return "medium";
+  }
+  if (normalized === "light") {
+    return "light";
+  }
+  return normalized;
+}
+
+function buildAvailableFontCatalog(fonts: Array<{ fontName?: { family?: string; style?: string } | null }>) {
+  const seen = new Set<string>();
+  const catalog: Array<{ family: string; style: string; familyKey: string; strictStyleKey: string }> = [];
+  for (const font of fonts) {
+    const family = String(font.fontName?.family || "").trim();
+    const style = String(font.fontName?.style || "").trim();
+    if (!family || !style) {
+      continue;
+    }
+    const familyKey = normalizeComparableFontFamily(family);
+    const strictStyleKey = normalizeStrictFontStyleKey(style);
+    const key = `${familyKey}::${strictStyleKey}::${normalizeComparableFontStyle(style)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    catalog.push({
+      family,
+      style,
+      familyKey,
+      strictStyleKey,
+    });
+  }
+  return catalog;
+}
+
+async function tryLoadExactFont(
+  family: string | null,
+  style: string | null,
+) {
+  const normalizedFamily = String(family || "").trim();
+  if (!normalizedFamily) {
+    return null;
+  }
+  const normalizedStyle = String(style || "").trim() || "Regular";
+  const targetFont = {
+    family: normalizedFamily,
+    style: normalizedStyle,
+  };
+  try {
+    await figma.loadFontAsync(targetFont);
+    return targetFont;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveFontStyleCandidates(fontStyle?: string, fontWeight?: number | string) {
+  const styles: string[] = [];
+  const seen = new Set<string>();
+  for (const style of [...fontStyleAliases(fontStyle), ...fontWeightStyleCandidates(fontWeight), "Regular", "Roman"]) {
+    pushUnique(styles, seen, style);
+  }
+  return styles;
+}
+
+async function resolveTextFont(params: {
+  fontFamily?: string;
+  fontFamilyCandidates?: string[];
+  fontStyle?: string;
+  fontWeight?: number | string;
+  resolvedBrowserFontFamily?: string;
+  resolvedBrowserFontStyle?: string;
+}) {
+  const browserResolvedFamily = String(params.resolvedBrowserFontFamily || "").trim() || null;
+  const browserResolvedStyle = String(params.resolvedBrowserFontStyle || "").trim() || null;
+  const requestedFamilyCandidates = resolveFontFamilyCandidates(params.fontFamily, params.fontFamilyCandidates);
+  const familyCandidates = browserResolvedFamily
+    ? resolveFontFamilyCandidates(browserResolvedFamily, requestedFamilyCandidates)
+    : requestedFamilyCandidates;
+  const styleCandidates = browserResolvedStyle
+    ? resolveFontStyleCandidates(browserResolvedStyle, undefined)
+    : resolveFontStyleCandidates(params.fontStyle, params.fontWeight);
+  const attempted: string[] = [];
+  const availableFonts = buildAvailableFontCatalog(await figma.listAvailableFontsAsync());
+  const browserFamilyKey = normalizeComparableFontFamily(browserResolvedFamily || undefined);
+  const browserStyleKey = normalizeStrictFontStyleKey(browserResolvedStyle || undefined);
+
+  if (browserResolvedFamily) {
+    const exactMatch = availableFonts.find(
+      (font) => font.familyKey === browserFamilyKey && font.strictStyleKey === browserStyleKey,
+    );
+    if (exactMatch) {
+      const targetFont = { family: exactMatch.family, style: exactMatch.style };
+      attempted.push(`${targetFont.family}/${targetFont.style}`);
+      await figma.loadFontAsync(targetFont);
+      return {
+        targetFont,
+        requestedFamilies: familyCandidates,
+        requestedStyles: styleCandidates,
+        browserResolvedFamily,
+        browserResolvedStyle,
+        fallbackOccurred: false,
+        deviatesFromBrowser: false,
+      };
+    }
+
+    const directlyLoadedFont = await tryLoadExactFont(browserResolvedFamily, browserResolvedStyle);
+    if (directlyLoadedFont) {
+      attempted.push(`${directlyLoadedFont.family}/${directlyLoadedFont.style}`);
+      return {
+        targetFont: directlyLoadedFont,
+        requestedFamilies: familyCandidates,
+        requestedStyles: styleCandidates,
+        browserResolvedFamily,
+        browserResolvedStyle,
+        fallbackOccurred: false,
+        deviatesFromBrowser: false,
+      };
+    }
+
+    throw new Error(
+      `当前 Figma session 未暴露浏览器实际字体 ${browserResolvedFamily}/${browserResolvedStyle || "Regular"}。`,
+    );
+  }
+
+  for (const family of familyCandidates) {
+    for (const style of styleCandidates) {
+      const catalogMatch = availableFonts.find(
+        (font) =>
+          font.familyKey === normalizeComparableFontFamily(family) &&
+          font.strictStyleKey === normalizeStrictFontStyleKey(style),
+      );
+      if (!catalogMatch) {
+        attempted.push(`${family}/${style}`);
+        const directlyLoadedFont = await tryLoadExactFont(family, style);
+        if (!directlyLoadedFont) {
+          continue;
+        }
+        return {
+          targetFont: directlyLoadedFont,
+          requestedFamilies: familyCandidates,
+          requestedStyles: styleCandidates,
+          browserResolvedFamily,
+          browserResolvedStyle,
+          fallbackOccurred: family !== familyCandidates[0] || style !== styleCandidates[0],
+          deviatesFromBrowser:
+            browserResolvedFamily === null
+              ? null
+              : normalizeComparableFontFamily(directlyLoadedFont.family) !== browserFamilyKey ||
+                (browserResolvedStyle !== null &&
+                  normalizeStrictFontStyleKey(directlyLoadedFont.style) !== normalizeStrictFontStyleKey(browserResolvedStyle)),
+        };
+      }
+      const targetFont = { family: catalogMatch.family, style: catalogMatch.style };
+      attempted.push(`${targetFont.family}/${targetFont.style}`);
+      try {
+        await figma.loadFontAsync(targetFont);
+        const fallbackOccurred = family !== familyCandidates[0] || style !== styleCandidates[0];
+        const deviatesFromBrowser =
+          browserResolvedFamily === null
+            ? null
+            : normalizeComparableFontFamily(targetFont.family) !== browserFamilyKey ||
+              (browserResolvedStyle !== null &&
+                normalizeStrictFontStyleKey(targetFont.style) !== normalizeStrictFontStyleKey(browserResolvedStyle));
+        return {
+          targetFont,
+          requestedFamilies: familyCandidates,
+          requestedStyles: styleCandidates,
+          browserResolvedFamily,
+          browserResolvedStyle,
+          fallbackOccurred,
+          deviatesFromBrowser,
+        };
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  throw new Error(`无法在 Figma 中加载文本字体。已尝试：${attempted.join(", ")}`);
 }
 
 async function resolveParentNode(parentNodeId: string | undefined, deps: CreationCommandDeps): Promise<any> {
@@ -407,7 +766,18 @@ export async function tryRunCreationCapabilityCommand(
       return deps.successResult(
         command.capabilityId,
         `已创建 Frame "${frame.name}" (${payload.width} × ${payload.height})。`,
-        { changedNodeIds: [frame.id] },
+        {
+          changedNodeIds: [frame.id],
+          createdNodeReceipts: [
+            {
+              nodeId: frame.id,
+              nodeType: frame.type,
+              name: frame.name,
+              analysisRefId: payload.analysisRefId || null,
+              parentNodeId: parent.id,
+            },
+          ],
+        },
       );
     }
 
@@ -416,13 +786,19 @@ export async function tryRunCreationCapabilityCommand(
         name?: string;
         content: string;
         fontFamily?: string;
+        fontFamilyCandidates?: string[];
         fontStyle?: string;
+        resolvedBrowserFontFamily?: string;
+        resolvedBrowserFontStyle?: string;
         fontSize?: number;
         fontWeight?: number | string;
         colorHex?: string;
         lineHeight?: number;
         letterSpacing?: number;
         alignment?: "left" | "center" | "right" | "justified";
+        width?: number;
+        height?: number;
+        textAutoResize?: "WIDTH_AND_HEIGHT" | "HEIGHT" | "NONE";
         x?: number;
         y?: number;
         parentNodeId?: string;
@@ -433,14 +809,14 @@ export async function tryRunCreationCapabilityCommand(
         throw new Error("文本内容不能为空。");
       }
 
-      const fontFamily = payload.fontFamily?.trim() || "Inter";
-      let fontStyle = payload.fontStyle?.trim() || "Regular";
-      if (payload.fontWeight !== undefined && !payload.fontStyle) {
-        fontStyle = String(normalizeFontWeightStyle(payload.fontWeight));
-      }
-
-      const targetFont = { family: fontFamily, style: fontStyle };
-      await figma.loadFontAsync(targetFont);
+      const targetFont = await resolveTextFont({
+        fontFamily: payload.fontFamily?.trim() || "Inter",
+        fontFamilyCandidates: payload.fontFamilyCandidates,
+        fontStyle: payload.fontStyle?.trim(),
+        fontWeight: payload.fontWeight,
+        resolvedBrowserFontFamily: payload.resolvedBrowserFontFamily?.trim(),
+        resolvedBrowserFontStyle: payload.resolvedBrowserFontStyle?.trim(),
+      });
 
       const parent = await resolveParentNode(payload.parentNodeId, deps);
       const textNode = figma.createText();
@@ -449,7 +825,7 @@ export async function tryRunCreationCapabilityCommand(
       if (payload.name && payload.name.trim()) {
         textNode.name = payload.name.trim();
       }
-      textNode.fontName = targetFont;
+      textNode.fontName = targetFont.targetFont;
       textNode.characters = payload.content;
 
       if (payload.fontSize !== undefined) {
@@ -476,6 +852,25 @@ export async function tryRunCreationCapabilityCommand(
       if (payload.alignment) {
         textNode.textAlignHorizontal = normalizeTextAlignment(payload.alignment);
       }
+      const textBoxMode = resolveTextBoxMode(payload);
+      const hasWidth = Number.isFinite(payload.width) && Number(payload.width) > 0;
+      const hasHeight = Number.isFinite(payload.height) && Number(payload.height) > 0;
+      if (textBoxMode === "HEIGHT" && "textAutoResize" in textNode) {
+        textNode.textAutoResize = "NONE";
+        if (hasWidth) {
+          textNode.resize(Number(payload.width), Math.max(1, Number(textNode.height)));
+        }
+        textNode.textAutoResize = "HEIGHT";
+      } else {
+        if (textBoxMode && "textAutoResize" in textNode) {
+          textNode.textAutoResize = textBoxMode;
+        }
+        if (hasWidth || hasHeight) {
+          const effectiveWidth = hasWidth ? Number(payload.width) : Math.max(1, Number(textNode.width));
+          const effectiveHeight = hasHeight ? Number(payload.height) : Math.max(1, Number(textNode.height));
+          textNode.resize(effectiveWidth, effectiveHeight);
+        }
+      }
       if (Number.isFinite(payload.x)) {
         textNode.x = payload.x;
       }
@@ -491,8 +886,102 @@ export async function tryRunCreationCapabilityCommand(
       return deps.successResult(
         command.capabilityId,
         `已创建文本节点 "${textNode.name}" 内容为 "${preview}"。`,
-        { changedNodeIds: [textNode.id] },
+        {
+          changedNodeIds: [textNode.id],
+          createdNodeReceipts: [
+            {
+              nodeId: textNode.id,
+              nodeType: textNode.type,
+              name: textNode.name,
+              analysisRefId: payload.analysisRefId || null,
+              parentNodeId: parent.id,
+              fontResolution: {
+                requestedFamilies: targetFont.requestedFamilies,
+                requestedStyles: targetFont.requestedStyles,
+                browserResolvedFamily: targetFont.browserResolvedFamily,
+                browserResolvedStyle: targetFont.browserResolvedStyle,
+                figmaResolvedFamily: targetFont.targetFont.family,
+                figmaResolvedStyle: targetFont.targetFont.style,
+                fallbackOccurred: targetFont.fallbackOccurred,
+                deviatesFromBrowser: targetFont.deviatesFromBrowser,
+              },
+            },
+          ],
+        },
       );
+    }
+
+    case "nodes.create-image": {
+      const payload = command.payload as {
+        name?: string;
+        imageDataUrl: string;
+        width: number;
+        height: number;
+        fitMode?: "cover" | "contain" | "stretch";
+        x?: number;
+        y?: number;
+        opacity?: number;
+        cornerRadius?: number;
+        parentNodeId?: string;
+        analysisRefId?: string;
+      };
+
+      if (!String(payload.imageDataUrl || "").trim()) {
+        throw new Error("imageDataUrl 不能为空。");
+      }
+      if (!Number.isFinite(payload.width) || payload.width <= 0 || !Number.isFinite(payload.height) || payload.height <= 0) {
+        throw new Error("Image 的宽高必须是大于 0 的数字。");
+      }
+
+      const parent = await resolveParentNode(payload.parentNodeId, deps);
+      const imageBytes = decodeDataUrl(payload.imageDataUrl).bytes;
+      const image = figma.createImage(imageBytes);
+      const node = figma.createRectangle();
+      parent.appendChild(node);
+      if (parentUsesAutoLayout(parent)) {
+        if (!("layoutPositioning" in node)) {
+          throw new Error("目标父级启用了 Auto Layout，但新图片节点不支持 absolute positioning。");
+        }
+        node.layoutPositioning = "ABSOLUTE";
+      }
+      node.resize(Math.max(1, Number(payload.width)), Math.max(1, Number(payload.height)));
+      if (payload.name && payload.name.trim()) {
+        node.name = payload.name.trim();
+      }
+      if (Number.isFinite(payload.x)) {
+        node.x = Number(payload.x);
+      }
+      if (Number.isFinite(payload.y)) {
+        node.y = Number(payload.y);
+      }
+      if (payload.cornerRadius !== undefined) {
+        if (!Number.isFinite(payload.cornerRadius) || payload.cornerRadius < 0) {
+          throw new Error("cornerRadius 必须是大于等于 0 的数字。");
+        }
+        node.cornerRadius = Number(payload.cornerRadius);
+      }
+
+      node.fills = [
+        {
+          type: "IMAGE",
+          imageHash: image.hash,
+          scaleMode: resolveImagePaintScaleMode(payload.fitMode),
+          visible: true,
+          opacity:
+            Number.isFinite(payload.opacity) && Number(payload.opacity) >= 0 && Number(payload.opacity) <= 1
+              ? Number(payload.opacity)
+              : 1,
+        },
+      ];
+      if ("strokes" in node) {
+        node.strokes = [];
+      }
+
+      deps.persistAnalysisRefId(node, payload.analysisRefId);
+      deps.registerAnalysisRefId(payload.analysisRefId, node.id);
+      return deps.successResult(command.capabilityId, `已创建图片节点 "${node.name}"。`, {
+        changedNodeIds: [node.id],
+      });
     }
 
     case "nodes.create-rectangle": {

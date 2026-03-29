@@ -148,9 +148,24 @@ test("ensureExplicitTargetingForMutations allows read-only batches and per-comma
       },
     ],
   };
+  const explicitParentCreationBatch: FigmaPluginCommandBatch = {
+    source: "codex",
+    commands: [
+      {
+        type: "capability",
+        capabilityId: "nodes.create-frame",
+        payload: {
+          width: 320,
+          height: 180,
+          parentNodeId: "1:2",
+        },
+      },
+    ],
+  };
 
   assert.doesNotThrow(() => ensureExplicitTargetingForMutations(readOnlyBatch, createSession(), []));
   assert.doesNotThrow(() => ensureExplicitTargetingForMutations(targetedBatch, createSession(), []));
+  assert.doesNotThrow(() => ensureExplicitTargetingForMutations(explicitParentCreationBatch, createSession(), []));
 });
 
 test("ensureSafeMutationBatch rejects mixed mutating target sets in the same batch", () => {
@@ -193,6 +208,30 @@ test("ensureSafeMutationBatch allows a shared mutating target set", () => {
         capabilityId: "nodes.rename",
         payload: { name: "Renamed" },
         nodeIds: ["1:2"],
+      },
+    ],
+  };
+
+  assert.doesNotThrow(() => ensureSafeMutationBatch(batch));
+});
+
+test("ensureSafeMutationBatch allows multiple analysis-ref target sets within one batch", () => {
+  const batch: FigmaPluginCommandBatch = {
+    source: "codex",
+    commands: [
+      {
+        type: "capability",
+        capabilityId: "nodes.set-clips-content",
+        payload: { value: true },
+        nodeIds: ["analysis:code-to-design:image-1"],
+      },
+      {
+        type: "capability",
+        capabilityId: "reconstruction.apply-raster-reference",
+        payload: {
+          referenceDataUrl: "data:image/png;base64,AAAA",
+        },
+        nodeIds: ["analysis:code-to-design:image-2"],
       },
     ],
   };

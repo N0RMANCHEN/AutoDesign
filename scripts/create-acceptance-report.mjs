@@ -71,6 +71,29 @@ const scenarioPresets = {
       "Escalate to live bridge acceptance if smoke validation exposes session drift or missing previews.",
     ],
   },
+  "runtime-read-live": {
+    scope: "Runtime read live acceptance",
+    scenario: "Validate runtime read contracts and CLI entrypoints against a live plugin session and current selection.",
+    commands: [
+      "npm run runtime:read -- bridge_overview",
+      "npm run runtime:read -- get_design_context --session <SESSION_ID>",
+      "npm run runtime:read -- get_variable_defs --session <SESSION_ID>",
+      "npm run runtime:read -- get_node_metadata --session <SESSION_ID> --node-id <NODE_ID>",
+      "npm run runtime:read -- get_screenshot --session <SESSION_ID> --node-id <NODE_ID> --allow-live-export --out <PNG_PATH>",
+    ],
+    steps: [
+      "Confirm an online plugin session is available and the current selection matches the intended runtime-read target.",
+      "Capture bridge overview, design-context, variable defs, node metadata and screenshot outputs through the runtime:read CLI.",
+      "Verify returned JSON and exported artifacts match the current file, page, selection and dependency truth.",
+    ],
+    observations: [
+      "Record whether runtime:read returned stable JSON without route errors or stale-session confusion.",
+      "Record whether node metadata, variable defs and screenshot artifacts matched the live selection and current file.",
+    ],
+    follow_up: [
+      "If any read surface returns an unavailable note or stale-session mismatch, attach the artifact and open a regression follow-up before trusting downstream context consumers.",
+    ],
+  },
 };
 
 function readFlag(argv, name) {

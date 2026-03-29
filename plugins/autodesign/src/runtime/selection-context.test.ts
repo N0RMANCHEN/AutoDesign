@@ -75,6 +75,7 @@ test("inspectNodeSubtree preserves nested text style and variable bindings", () 
     lineHeight: { value: 32, unit: "PIXELS" },
     letterSpacing: { value: 0.2, unit: "PIXELS" },
     textAlignHorizontal: "CENTER",
+    textAutoResize: "HEIGHT",
     parent: null as any,
   };
   const root = {
@@ -85,6 +86,9 @@ test("inspectNodeSubtree preserves nested text style and variable bindings", () 
     y: 20,
     width: 160,
     height: 100,
+    layoutWrap: "WRAP",
+    counterAxisSpacing: 18,
+    minWidth: 120,
     fills: [{ type: "SOLID", color: { r: 0, g: 0, b: 0 } }],
     fillStyleId: "S:fill-card",
     strokes: [],
@@ -105,4 +109,8 @@ test("inspectNodeSubtree preserves nested text style and variable bindings", () 
   assert.deepEqual(subtree[1]?.boundVariableIds, ["var-font-size", "var-text-fill"]);
   assert.deepEqual(subtree[1]?.variableBindings?.fontSize, ["var-font-size"]);
   assert.deepEqual(subtree[1]?.variableBindings?.fills, ["var-text-fill"]);
+  assert.equal(subtree[1]?.textAutoResize, "HEIGHT");
+  assert.equal(subtree[0]?.layoutWrap, "WRAP");
+  assert.equal(subtree[0]?.counterAxisSpacing, 18);
+  assert.equal(subtree[0]?.minWidth, 120);
 });

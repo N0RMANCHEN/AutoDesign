@@ -92,6 +92,9 @@
 - `plugin:inspect`
 - `plugin:preview`
 - `plugin:reconstruct`
+- `code-to-figma:preflight`
+- `code-to-design:capture`
+- `code-to-design:plan`
 
 要求：
 
@@ -168,6 +171,8 @@
 - 关键入口文档无失效路径
 - 非插件运行时不得越界触碰 Figma API
 - 关键 truth store 只能由 owner 模块写入
+- “前端代码 -> 可编辑 Figma” 的承诺必须先经过可逆子集 preflight，遇到不可逆特性直接 fail fast
+- Code-to-Design 的采样 artifact 与 Figma command plan 必须有可重复单测，不能只靠手工截图比对
 - targeting 归一化、CLI guard、capability registry、governance scripts、prompt composition、context pack、runtime action、project storage、plugin bridge store、reconstruction analysis contract 和 reconstruction lifecycle / refine 纯逻辑必须有可重复单测
 
 ## 5. 回归门槛

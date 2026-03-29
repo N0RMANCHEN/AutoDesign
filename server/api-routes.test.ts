@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import type { PluginBridgeSnapshot } from "../shared/plugin-bridge.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverPath = path.join(repoRoot, "server", "index.ts");
@@ -254,6 +256,22 @@ async function registerSampleSession(server: ServerModule) {
   assert.equal(body.id, "session_test");
 }
 
+function resolveBridgeSnapshotPath() {
+  const dataDir = process.env.AUTODESIGN_DATA_DIR;
+  assert.ok(dataDir, "AUTODESIGN_DATA_DIR must be set for in-memory API tests");
+  return path.join(dataDir, "autodesign-plugin-bridge.json");
+}
+
+async function mutateBridgeSnapshot(
+  mutate: (snapshot: PluginBridgeSnapshot) => PluginBridgeSnapshot,
+) {
+  const bridgeFile = resolveBridgeSnapshotPath();
+  const snapshot = JSON.parse(
+    await readFile(bridgeFile, "utf8"),
+  ) as PluginBridgeSnapshot;
+  await writeFile(bridgeFile, JSON.stringify(mutate(snapshot), null, 2), "utf8");
+}
+
 function createStructuredAnalysisPayload() {
   return {
     width: 160,
@@ -341,6 +359,111 @@ test("api_routes register plugin session and expose it through the bridge snapsh
     assert.equal(body.sessions[0]?.id, "session_test");
     assert.equal(body.sessions[0]?.status, "online");
     assert.equal(body.sessions[0]?.selection[1]?.id, "reference-1");
+  });
+});
+
+test("api_routes optionally claim the next queued plugin command during register and heartbeat", async () => {
+  await withInMemoryServer(async (server) => {
+    const queuedOnRegister = await requestJson<any>(server, "/api/plugin-bridge/commands", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+        source: "codex",
+        payload: {
+          source: "codex",
+          commands: [
+            {
+              type: "capability",
+              capabilityId: "selection.refresh",
+              payload: {},
+            },
+          ],
+        },
+      }),
+    });
+    assert.equal(queuedOnRegister.response.status, 200);
+
+    const registerPayload = {
+      sessionId: "session_test",
+      label: "AutoDesign",
+      pluginVersion: "0.2.7",
+      editorType: "figma",
+      fileName: "Demo File",
+      pageName: "Page A",
+      runtimeFeatures: {
+        supportsExplicitNodeTargeting: true,
+      },
+      capabilities: [],
+      selection: [
+        {
+          id: "target-1",
+          name: "Target Frame",
+          type: "FRAME",
+          fillable: true,
+          fills: [],
+          fillStyleId: null,
+          width: 160,
+          height: 100,
+        },
+      ],
+      claimCommand: true,
+    };
+
+    const registered = await requestJson<any>(
+      server,
+      "/api/plugin-bridge/sessions/register",
+      {
+        method: "POST",
+        body: JSON.stringify(registerPayload),
+      },
+    );
+    assert.equal(registered.response.status, 200);
+    assert.equal(registered.body.session.id, "session_test");
+    assert.equal(registered.body.command.id, queuedOnRegister.body.id);
+    assert.equal(registered.body.command.status, "claimed");
+
+    const queuedOnHeartbeat = await requestJson<any>(server, "/api/plugin-bridge/commands", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+        source: "codex",
+        payload: {
+          source: "codex",
+          commands: [
+            {
+              type: "capability",
+              capabilityId: "runtime.inspect-font-catalog",
+              payload: {},
+            },
+          ],
+        },
+      }),
+    });
+    assert.equal(queuedOnHeartbeat.response.status, 200);
+
+    const heartbeated = await requestJson<any>(
+      server,
+      "/api/plugin-bridge/sessions/session_test/heartbeat",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...registerPayload,
+          pageName: "Page B",
+          claimCommand: true,
+        }),
+      },
+    );
+    assert.equal(heartbeated.response.status, 200);
+    assert.equal(heartbeated.body.session.id, "session_test");
+    assert.equal(heartbeated.body.session.pageName, "Page B");
+    assert.equal(heartbeated.body.command.id, queuedOnHeartbeat.body.id);
+    assert.equal(heartbeated.body.command.status, "claimed");
+
+    const snapshot = await requestJson<any>(server, "/api/plugin-bridge");
+    assert.equal(snapshot.body.commands[0]?.id, queuedOnHeartbeat.body.id);
+    assert.equal(snapshot.body.commands[0]?.status, "claimed");
+    assert.equal(snapshot.body.commands[1]?.id, queuedOnRegister.body.id);
+    assert.equal(snapshot.body.commands[1]?.status, "claimed");
   });
 });
 
@@ -939,6 +1062,73 @@ test("api_routes expose cached screenshots and explicit unavailable notes for sc
   });
 });
 
+test("api_routes reject runtime screenshot requests with missing or unknown sessions and ambiguous selection", async () => {
+  await withInMemoryServer(async (server) => {
+    await registerSampleSession(server);
+
+    const missingSession = await requestJson<any>(server, "/api/runtime/screenshot", {
+      method: "POST",
+      body: JSON.stringify({
+        nodeId: "reference-1",
+      }),
+    });
+    assert.equal(missingSession.response.status, 400);
+    assert.match(String(missingSession.body.error), /targetSessionId is required/);
+
+    const unknownSession = await requestJson<any>(server, "/api/runtime/screenshot", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "missing-session",
+        nodeId: "reference-1",
+      }),
+    });
+    assert.equal(unknownSession.response.status, 404);
+    assert.match(String(unknownSession.body.error), /Plugin session not found/);
+
+    const ambiguousSelection = await requestJson<any>(server, "/api/runtime/screenshot", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+      }),
+    });
+    assert.equal(ambiguousSelection.response.status, 400);
+    assert.match(String(ambiguousSelection.body.error), /多个 selection/);
+  });
+});
+
+test("api_routes return explicit unavailable screenshots when live export fails against a stale session", async () => {
+  await withInMemoryServer(async (server) => {
+    await registerSampleSession(server);
+    await mutateBridgeSnapshot((snapshot) => ({
+      ...snapshot,
+      sessions: snapshot.sessions.map((session) =>
+        session.id === "session_test"
+          ? {
+              ...session,
+              lastSeenAt: "2020-01-01T00:00:00.000Z",
+            }
+          : session,
+      ),
+    }));
+
+    const liveFailure = await requestJson<any>(server, "/api/runtime/screenshot", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+        nodeId: "target-1",
+        allowLiveExport: true,
+      }),
+    });
+
+    assert.equal(liveFailure.response.status, 200);
+    assert.equal(liveFailure.body.available, false);
+    assert.equal(liveFailure.body.nodeId, "target-1");
+    assert.equal(liveFailure.body.screenshot, null);
+    assert.match(String(liveFailure.body.note), /live screenshot failed/);
+    assert.match(String(liveFailure.body.note), /not online/);
+  });
+});
+
 test("api_routes expose cached node metadata summaries and explicit live-inspect gaps", async () => {
   await withInMemoryServer(async (server) => {
     await registerSampleSession(server);
@@ -990,6 +1180,94 @@ test("api_routes expose cached node metadata summaries and explicit live-inspect
     assert.equal(unavailable.body.available, false);
     assert.equal(unavailable.body.node, null);
     assert.match(String(unavailable.body.note), /allowLiveInspect=true/);
+  });
+});
+
+test("api_routes reject runtime node-metadata requests with missing or unknown sessions and ambiguous selection", async () => {
+  await withInMemoryServer(async (server) => {
+    await registerSampleSession(server);
+
+    const missingSession = await requestJson<any>(server, "/api/runtime/node-metadata", {
+      method: "POST",
+      body: JSON.stringify({
+        nodeId: "target-1",
+      }),
+    });
+    assert.equal(missingSession.response.status, 400);
+    assert.match(String(missingSession.body.error), /targetSessionId is required/);
+
+    const unknownSession = await requestJson<any>(server, "/api/runtime/node-metadata", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "missing-session",
+        nodeId: "target-1",
+      }),
+    });
+    assert.equal(unknownSession.response.status, 404);
+    assert.match(String(unknownSession.body.error), /Plugin session not found/);
+
+    const ambiguousSelection = await requestJson<any>(server, "/api/runtime/node-metadata", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+      }),
+    });
+    assert.equal(ambiguousSelection.response.status, 400);
+    assert.match(String(ambiguousSelection.body.error), /多个 selection/);
+  });
+});
+
+test("api_routes return explicit unavailable node metadata when live inspect fails against a stale session", async () => {
+  await withInMemoryServer(async (server) => {
+    await registerSampleSession(server);
+    await mutateBridgeSnapshot((snapshot) => ({
+      ...snapshot,
+      sessions: snapshot.sessions.map((session) =>
+        session.id === "session_test"
+          ? {
+              ...session,
+              lastSeenAt: "2020-01-01T00:00:00.000Z",
+            }
+          : session,
+      ),
+    }));
+
+    const liveFailure = await requestJson<any>(server, "/api/runtime/node-metadata", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "session_test",
+        nodeId: "target-1",
+        allowLiveInspect: true,
+      }),
+    });
+
+    assert.equal(liveFailure.response.status, 200);
+    assert.equal(liveFailure.body.available, false);
+    assert.equal(liveFailure.body.node, null);
+    assert.match(String(liveFailure.body.note), /live metadata failed/);
+    assert.match(String(liveFailure.body.note), /not online/);
+  });
+});
+
+test("api_routes reject design-context and variable-def requests when the target session is unknown", async () => {
+  await withInMemoryServer(async (server) => {
+    const designContext = await requestJson<any>(server, "/api/runtime/design-context", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "missing-session",
+      }),
+    });
+    assert.equal(designContext.response.status, 404);
+    assert.match(String(designContext.body.error), /Plugin session not found/);
+
+    const variableDefs = await requestJson<any>(server, "/api/runtime/variable-defs", {
+      method: "POST",
+      body: JSON.stringify({
+        targetSessionId: "missing-session",
+      }),
+    });
+    assert.equal(variableDefs.response.status, 404);
+    assert.match(String(variableDefs.body.error), /Plugin session not found/);
   });
 });
 

@@ -140,3 +140,161 @@ test("prepare_live_acceptance leaves a pending report behind when preflight fail
     assert.deepEqual(reportJson.artifacts, []);
   });
 });
+
+test("prepare_live_acceptance supports the runtime-read-live scenario and syncs runtime artifacts into the report", async () => {
+  await withTempRoot(async (tempRoot, fixtureDir) => {
+    await writeFile(
+      path.join(fixtureDir, "get__api__plugin-bridge.json"),
+      JSON.stringify(
+        {
+          sessions: [
+            {
+              id: "session_runtime_prep",
+              label: "AutoDesign",
+              pluginVersion: "0.2.0",
+              editorType: "figma",
+              fileName: "Runtime Prep File",
+              pageName: "Runtime Prep",
+              status: "online",
+              lastSeenAt: "2026-03-23T13:30:00.000Z",
+              lastHandshakeAt: "2026-03-23T13:30:00.000Z",
+              runtimeFeatures: { supportsExplicitNodeTargeting: true },
+              capabilities: [{ id: "selection.refresh" }],
+              selection: [
+                {
+                  id: "8:1",
+                  name: "Runtime Target",
+                  type: "FRAME",
+                  fillable: true,
+                  fills: [],
+                  fillStyleId: null,
+                  previewDataUrl: pngDataUrl("runtime-prep-preview"),
+                },
+              ],
+            },
+          ],
+          commands: [],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "get__api__runtime__bridge-overview.json"),
+      JSON.stringify({
+        sessionCount: 1,
+        onlineSessionCount: 1,
+        staleSessionCount: 0,
+        commandCounts: { queued: 0, claimed: 0, succeeded: 0, failed: 0 },
+        sessions: [],
+        commands: [],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__design-context.json"),
+      JSON.stringify({
+        selectionIds: [],
+        primarySelectionId: null,
+        metadata: [],
+        contextPack: { selectionIds: [], graphKind: "codegraph", action: "codegraph/summarize" },
+        designContext: { sources: [], screens: [], componentMappings: [], reviewItems: [] },
+        variableDefs: { available: true, source: "plugin-session-variable-snapshot", note: "ok", collections: [], colors: [], spacing: [], variables: [] },
+        pluginSelection: {
+          targetSessionId: "session_runtime_prep",
+          primarySelectionNodeId: "8:1",
+          available: true,
+          source: "plugin-selection-summary",
+          note: "ok",
+          selectionNodeIds: ["8:1"],
+          selection: [],
+          dependencies: { resolvedStyles: [], resolvedVariables: [], unresolvedStyleIds: [], unresolvedVariableIds: [] },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__variable-defs.json"),
+      JSON.stringify({
+        selectionIds: [],
+        primarySelectionId: null,
+        variableDefs: { available: true, source: "plugin-session-variable-snapshot", note: "ok", collections: [], colors: [], spacing: [], variables: [] },
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__node-metadata.json"),
+      JSON.stringify({
+        targetSessionId: "session_runtime_prep",
+        nodeId: "8:1",
+        available: true,
+        source: "session-selection-summary",
+        note: "ok",
+        node: { id: "8:1", name: "Runtime Target" },
+        subtree: [{ id: "8:1", name: "Runtime Target" }],
+        resolvedStyleBindings: [],
+        resolvedVariables: [],
+        unresolvedVariableIds: [],
+        subtreeResolvedStyles: [],
+        subtreeResolvedVariables: [],
+        subtreeUnresolvedStyleIds: [],
+        subtreeUnresolvedVariableIds: [],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__screenshot.json"),
+      JSON.stringify({
+        targetSessionId: "session_runtime_prep",
+        nodeId: "8:1",
+        available: true,
+        source: "session-selection-preview",
+        note: null,
+        screenshot: {
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          dataUrl: pngDataUrl("runtime-prep-screenshot"),
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const timestamp = "20260323-234000";
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [scriptPath, "--timestamp", timestamp, "--owner", "hirohi", "--scenario", "runtime-read-live"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          AUTODESIGN_REPORT_ROOT: tempRoot,
+          AUTODESIGN_API_FIXTURE_DIR: fixtureDir,
+        },
+      },
+    );
+
+    const reportJson = JSON.parse(
+      await readFile(path.join(tempRoot, "reports", "acceptance", `acceptance-${timestamp}.json`), "utf8"),
+    );
+    const preflightSummary = await readFile(
+      path.join(tempRoot, "reports", "acceptance", "artifacts", timestamp, "preflight-summary.txt"),
+      "utf8",
+    );
+
+    assert.equal(reportJson.scope, "Runtime read live acceptance");
+    assert.ok(
+      reportJson.artifacts.includes(
+        `reports/acceptance/artifacts/${timestamp}/runtime-design-context.json`,
+      ),
+    );
+    assert.ok(
+      reportJson.artifacts.includes(
+        `reports/acceptance/artifacts/${timestamp}/runtime-screenshot-runtime-target.png`,
+      ),
+    );
+    assert.match(preflightSummary, /runtimeReadArtifacts:/);
+    assert.match(stdout, /\[acceptance:prep] scenario: runtime-read-live/);
+  });
+});

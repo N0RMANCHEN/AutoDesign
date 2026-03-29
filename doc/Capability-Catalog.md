@@ -149,6 +149,8 @@ type PluginCommandExecutionResult = {
   warnings: string[];
   errorCode: string | null;
   message: string;
+  fontCatalog?: PluginAvailableFont[];
+  fontLoadResults?: PluginFontLoadProbeResult[];
 };
 ```
 
@@ -165,6 +167,8 @@ type PluginCommandExecutionResult = {
 
 | capabilityId | domain | status | payload | 作用 |
 | --- | --- | --- | --- | --- |
+| `runtime.inspect-font-catalog` | `runtime` | implemented | `{}` | 读取当前 Figma runtime session 可见的字体目录 |
+| `runtime.probe-font-load` | `runtime` | implemented | `{ fonts: [{ family, style? }] }` | 对精确 family/style 执行 `loadFontAsync` 探测，区分 catalog 缺失和真实不可加载 |
 | `selection.refresh` | `selection` | implemented | `{}` | 读取当前 selection，并更新插件会话上下文 |
 | `nodes.inspect-subtree` | `nodes` | implemented | `{ nodeId, maxDepth? }` | 读取目标节点或 Frame 的 subtree，并返回结构化节点清单 |
 | `fills.set-fill` | `fills-strokes-effects` | implemented | `{ hex }` | 把当前 selection 的 fill 改成实体色 |
@@ -186,7 +190,8 @@ type PluginCommandExecutionResult = {
 | `layout.configure-frame` | `layout-autolayout` | implemented | `{ layoutMode?, primaryAxisSizingMode?, counterAxisSizingMode?, primaryAxisAlignItems?, counterAxisAlignItems?, itemSpacing?, paddingLeft?, paddingRight?, paddingTop?, paddingBottom?, clipsContent? }` | 配置选中 Frame 的 Auto Layout、padding、spacing 和 clipping |
 | `layout.configure-child` | `layout-autolayout` | implemented | `{ layoutAlign?, layoutGrow?, layoutPositioning? }` | 配置 Auto Layout 子节点的布局规则 |
 | `nodes.create-frame` | `nodes` | implemented | `{ name?, width, height, x?, y?, fillHex?, cornerRadius?, parentNodeId? }` | 创建一个空 Frame |
-| `nodes.create-text` | `nodes` | implemented | `{ name?, content, fontFamily?, fontStyle?, fontSize?, fontWeight?, colorHex?, x?, y?, parentNodeId? }` | 创建一个文本节点 |
+| `nodes.create-text` | `nodes` | implemented | `{ name?, content, fontFamily?, fontStyle?, fontSize?, fontWeight?, colorHex?, lineHeight?, letterSpacing?, alignment?, width?, height?, textAutoResize?, x?, y?, parentNodeId? }` | 创建一个文本节点，并可固定文本盒宽高 |
+| `nodes.create-image` | `nodes` | implemented | `{ name?, imageDataUrl, width, height, fitMode?, x?, y?, opacity?, cornerRadius?, parentNodeId? }` | 创建一个带 image fill 的矩形节点 |
 | `nodes.create-rectangle` | `nodes` | implemented | `{ name?, width, height, x?, y?, placement?, gap?, fillHex?, strokeHex?, strokeWeight?, cornerRadius?, opacity?, parentNodeId? }` | 创建一个矩形节点 |
 | `nodes.create-ellipse` | `nodes` | implemented | `{ name?, width, height, x?, y?, fillHex?, strokeHex?, strokeWeight?, opacity?, parentNodeId? }` | 创建一个椭圆节点 |
 | `nodes.create-line` | `nodes` | implemented | `{ name?, width, height?, x?, y?, strokeHex?, strokeWeight?, opacity?, rotation?, parentNodeId? }` | 创建一个线段节点 |
@@ -259,7 +264,7 @@ type PluginCommandExecutionResult = {
   - `vector-reconstruction`：保持 target Frame 尺寸固定，并将 vector/text rebuild plan 写入目标 Frame
   - `raster-exact`：替换目标 Frame 内容，并将参考图以 raster 结果写入目标 Frame
   - `structural-preview`：将当前 job 的 preview-only rebuild plan 以 skeleton 形式写入目标 Frame
-  - `vector-reconstruction` 当前允许执行 `nodes.create-rectangle` / `nodes.create-ellipse` / `nodes.create-line` / `nodes.create-svg` / `nodes.create-text`
+  - `vector-reconstruction` 当前允许执行 `nodes.create-rectangle` / `nodes.create-ellipse` / `nodes.create-line` / `nodes.create-svg` / `nodes.create-text` / `nodes.create-image`
 - `POST /api/reconstruction/jobs/:jobId/clear`
   - 只删除当前 job 自己创建的节点
 - `POST /api/reconstruction/jobs/:jobId/loop`
@@ -390,6 +395,7 @@ type PluginCommandExecutionResult = {
 | `nodes.frame-selection` | implemented | 用 Frame 包裹 selection |
 | `nodes.create-frame` | implemented | 创建空 Frame |
 | `nodes.create-text` | implemented | 创建文本节点 |
+| `nodes.create-image` | implemented | 创建图片节点 |
 | `nodes.create-rectangle` | implemented | 创建矩形节点 |
 | `nodes.create-ellipse` | implemented | 创建椭圆节点 |
 | `nodes.create-line` | implemented | 创建线段节点 |

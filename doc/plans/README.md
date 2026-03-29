@@ -82,6 +82,8 @@
 - [testing-and-acceptance-hardening.md](testing-and-acceptance-hardening.md)
 - [workspace-context-pack-hardening.md](workspace-context-pack-hardening.md)
 - [figma-mcp-alignment.md](figma-mcp-alignment.md)
+- [code-to-figma-preflight.md](code-to-figma-preflight.md)
+- [code-to-design-runtime-capture.md](code-to-design-runtime-capture.md)
 
 ## Future / Background
 

@@ -1,9 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rootDirectory = process.env.AUTODESIGN_REPORT_ROOT
   ? path.resolve(process.env.AUTODESIGN_REPORT_ROOT)
   : process.cwd();
+const runtimeReadCliScript = path.join(repoRoot, "scripts", "runtime-read-cli.ts");
 const baseUrl =
   process.env.AUTODESIGN_API_URL ??
   process.env.FIGMATEST_API_URL ??
@@ -110,6 +114,7 @@ function buildSummary({
   snapshotPath,
   session,
   exportedPreviews,
+  runtimeArtifacts,
 }) {
   const lines = [
     `timestamp: ${timestamp}`,
@@ -141,10 +146,117 @@ function buildSummary({
     }
   }
 
+  if (runtimeArtifacts.length > 0) {
+    lines.push("runtimeReadArtifacts:");
+    for (const artifact of runtimeArtifacts) {
+      lines.push(`- ${artifact}`);
+    }
+  }
+
   lines.push("nextSuggestedSteps:");
   lines.push("- Confirm the plugin session remains online in Figma.");
-  lines.push("- If the selection is correct, proceed with the live acceptance steps in the generated report.");
+  if (scenario === "runtime-read-live") {
+    lines.push("- Open the runtime-read artifacts and confirm session, node and dependency truth are aligned before trusting downstream context consumers.");
+    lines.push("- If the selection or runtime artifact target is wrong, fix the live session first and rerun acceptance:prep.");
+  } else {
+    lines.push("- If the selection is correct, proceed with the live acceptance steps in the generated report.");
+  }
   return `${lines.join("\n")}\n`;
+}
+
+function runRuntimeReadCli(args) {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", runtimeReadCliScript, ...args],
+    {
+      cwd: repoRoot,
+      env: process.env,
+      encoding: "utf8",
+    },
+  );
+
+  if (result.status !== 0) {
+    fail(result.stderr?.trim() || result.stdout?.trim() || "runtime:read failed");
+  }
+
+  return JSON.parse(result.stdout);
+}
+
+async function writeJsonArtifact(artifactDirectory, fileName, payload) {
+  const filePath = path.join(artifactDirectory, fileName);
+  await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return path.relative(rootDirectory, filePath);
+}
+
+async function collectRuntimeReadArtifacts({
+  artifactDirectory,
+  session,
+}) {
+  const artifacts = [];
+  const bridgeOverview = runRuntimeReadCli(["bridge_overview"]);
+  artifacts.push(await writeJsonArtifact(artifactDirectory, "runtime-bridge-overview.json", bridgeOverview));
+
+  const designContext = runRuntimeReadCli([
+    "get_design_context",
+    "--session",
+    session.id,
+  ]);
+  artifacts.push(await writeJsonArtifact(artifactDirectory, "runtime-design-context.json", designContext));
+
+  const variableDefs = runRuntimeReadCli([
+    "get_variable_defs",
+    "--session",
+    session.id,
+  ]);
+  artifacts.push(await writeJsonArtifact(artifactDirectory, "runtime-variable-defs.json", variableDefs));
+
+  const primaryNode = Array.isArray(session.selection) ? session.selection[0] ?? null : null;
+  if (!primaryNode) {
+    return artifacts;
+  }
+
+  const nodeLabel = sanitizeFileSegment(primaryNode.name || primaryNode.id);
+  const nodeMetadata = runRuntimeReadCli([
+    "get_node_metadata",
+    "--session",
+    session.id,
+    "--node-id",
+    primaryNode.id,
+  ]);
+  artifacts.push(
+    await writeJsonArtifact(
+      artifactDirectory,
+      `runtime-node-metadata-${nodeLabel}.json`,
+      nodeMetadata,
+    ),
+  );
+
+  const screenshotOutputPath = path.join(
+    artifactDirectory,
+    `runtime-screenshot-${nodeLabel}.png`,
+  );
+  const screenshot = runRuntimeReadCli([
+    "get_screenshot",
+    "--session",
+    session.id,
+    "--node-id",
+    primaryNode.id,
+    "--allow-live-export",
+    "--out",
+    screenshotOutputPath,
+  ]);
+  artifacts.push(
+    await writeJsonArtifact(
+      artifactDirectory,
+      `runtime-screenshot-${nodeLabel}.json`,
+      screenshot,
+    ),
+  );
+  if (screenshot.artifactPath) {
+    artifacts.push(path.relative(rootDirectory, screenshot.artifactPath));
+  }
+
+  return artifacts;
 }
 
 async function main() {
@@ -177,6 +289,13 @@ async function main() {
     exportedPreviews.push(path.relative(rootDirectory, filePath));
   }
 
+  const runtimeArtifacts = scenario === "runtime-read-live"
+    ? await collectRuntimeReadArtifacts({
+        artifactDirectory,
+        session,
+      })
+    : [];
+
   const summaryPath = path.join(artifactDirectory, "preflight-summary.txt");
   const summary = buildSummary({
     timestamp,
@@ -184,12 +303,16 @@ async function main() {
     snapshotPath: path.relative(rootDirectory, snapshotPath),
     session,
     exportedPreviews,
+    runtimeArtifacts,
   });
   await writeFile(summaryPath, summary, "utf8");
 
   console.log(`acceptance preflight created: ${path.relative(rootDirectory, snapshotPath)}`);
   console.log(`acceptance preflight created: ${path.relative(rootDirectory, summaryPath)}`);
   for (const artifact of exportedPreviews) {
+    console.log(`acceptance preflight created: ${artifact}`);
+  }
+  for (const artifact of runtimeArtifacts) {
     console.log(`acceptance preflight created: ${artifact}`);
   }
 }

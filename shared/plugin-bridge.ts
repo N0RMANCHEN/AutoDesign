@@ -57,15 +57,21 @@ export type PluginNodeInspection = PluginNodeSummary & {
   layoutAlign?: string | null;
   layoutSizingHorizontal?: string | null;
   layoutSizingVertical?: string | null;
+  layoutWrap?: string | null;
   primaryAxisSizingMode?: string | null;
   counterAxisSizingMode?: string | null;
   primaryAxisAlignItems?: string | null;
   counterAxisAlignItems?: string | null;
   itemSpacing?: number | null;
+  counterAxisSpacing?: number | null;
   paddingLeft?: number | null;
   paddingRight?: number | null;
   paddingTop?: number | null;
   paddingBottom?: number | null;
+  minWidth?: number | null;
+  maxWidth?: number | null;
+  minHeight?: number | null;
+  maxHeight?: number | null;
   textContent?: string | null;
   fontFamily?: string | null;
   fontStyle?: string | null;
@@ -74,6 +80,7 @@ export type PluginNodeInspection = PluginNodeSummary & {
   lineHeight?: number | null;
   letterSpacing?: number | null;
   textAlignment?: string | null;
+  textAutoResize?: string | null;
   mainComponentId?: string | null;
   mainComponentName?: string | null;
   componentPropertyReferences?: string[];
@@ -90,6 +97,22 @@ export type PluginImageArtifact = {
   height: number;
   dataUrl: string;
   source: "image-fill-original" | "node-export";
+};
+
+export type PluginAvailableFont = {
+  family: string;
+  style: string;
+  familyKey: string;
+  styleKey: string;
+};
+
+export type PluginFontLoadProbeResult = {
+  family: string;
+  style: string;
+  familyKey: string;
+  styleKey: string;
+  ok: boolean;
+  message: string;
 };
 
 export type PluginVariableCollectionMode = {
@@ -201,6 +224,12 @@ export type PluginSessionRegistrationPayload = {
   hasVariableSnapshot?: boolean;
   variableCollections?: PluginVariableCollectionSummary[];
   variables?: PluginVariableDefinition[];
+  claimCommand?: boolean;
+};
+
+export type PluginBridgeSyncResponse = {
+  session: PluginBridgeSession;
+  command: PluginBridgeCommandRecord | null;
 };
 
 export type QueuePluginCommandPayload = {
@@ -220,6 +249,29 @@ export type PluginCommandExecutionResult = {
   warnings: string[];
   errorCode: string | null;
   message: string;
+  createdNodeReceipts?: PluginCreatedNodeReceipt[];
+  fontCatalog?: PluginAvailableFont[];
+  fontLoadResults?: PluginFontLoadProbeResult[];
+};
+
+export type PluginFontResolutionReceipt = {
+  requestedFamilies: string[];
+  requestedStyles: string[];
+  browserResolvedFamily: string | null;
+  browserResolvedStyle: string | null;
+  figmaResolvedFamily: string;
+  figmaResolvedStyle: string;
+  fallbackOccurred: boolean;
+  deviatesFromBrowser: boolean | null;
+};
+
+export type PluginCreatedNodeReceipt = {
+  nodeId: string;
+  nodeType: string;
+  name: string;
+  analysisRefId?: string | null;
+  parentNodeId?: string | null;
+  fontResolution?: PluginFontResolutionReceipt;
 };
 
 export type PluginCommandResultPayload = {

@@ -6,6 +6,7 @@ import {
   type PluginCommandComposition,
 } from "../shared/plugin-command-composer.js";
 import type {
+  PluginBridgeCommandRecord,
   InspectFrameResponsePayload,
   PluginBridgeSession,
   PluginBridgeSnapshot,
@@ -37,6 +38,9 @@ type PreviewTarget = {
   index: number;
   node: PluginBridgeSession["selection"][number];
 };
+
+const COMMAND_WAIT_TIMEOUT_MS = 30_000;
+const COMMAND_WAIT_POLL_INTERVAL_MS = 300;
 
 function fail(message: string): never {
   throw new Error(message);
@@ -127,6 +131,61 @@ function sortSessions(sessions: PluginBridgeSession[]) {
   );
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForQueuedCommand(commandId: string, timeoutMs: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
+    const command = snapshot.commands.find((item) => item.id === commandId) || null;
+    if (command && (command.status === "succeeded" || command.status === "failed")) {
+      return command;
+    }
+    await sleep(COMMAND_WAIT_POLL_INTERVAL_MS);
+  }
+  fail(`Timed out waiting for plugin command ${commandId}.`);
+}
+
+async function maybeWriteCommandRecord(
+  command: PluginBridgeCommandRecord,
+  outputPath: string | null,
+) {
+  if (!outputPath) {
+    return;
+  }
+  const resolvedOutputPath = path.resolve(outputPath);
+  await mkdir(path.dirname(resolvedOutputPath), { recursive: true });
+  await writeFile(resolvedOutputPath, `${JSON.stringify(command, null, 2)}\n`, "utf8");
+}
+
+function printCommandResults(command: PluginBridgeCommandRecord) {
+  console.log(`status: ${command.status}`);
+  if (command.resultMessage) {
+    console.log(`result: ${command.resultMessage}`);
+  }
+  if (!command.results.length) {
+    console.log("results: none");
+    return;
+  }
+  console.log("results:");
+  for (const [index, result] of command.results.entries()) {
+    console.log(
+      `- [${index}] ${result.capabilityId} ok=${result.ok ? "yes" : "no"} changed=${result.changedNodeIds.length} warnings=${result.warnings.length} receipts=${result.createdNodeReceipts?.length || 0} exports=${result.exportedImages.length} inspected=${result.inspectedNodes.length}`,
+    );
+    if (result.message) {
+      console.log(`  message=${result.message}`);
+    }
+    if (result.errorCode) {
+      console.log(`  errorCode=${result.errorCode}`);
+    }
+    if (result.warnings.length) {
+      console.log(`  warnings=${result.warnings.join(" | ")}`);
+    }
+  }
+}
+
 function pickSession(
   sessions: PluginBridgeSession[],
   explicitSessionId: string | null,
@@ -146,12 +205,13 @@ function pickSession(
   return sortSessions(sessions)[0];
 }
 
-function parseBatchFromArgs(argv: string[]) {
+async function parseBatchFromArgs(argv: string[]) {
   const prompt = readFlag(argv, "--prompt");
   const json = readFlag(argv, "--json");
+  const jsonFile = readValueFlag(argv, "--json-file");
 
-  if (prompt && json) {
-    fail("只能使用一种输入方式：--prompt 或 --json。");
+  if ([prompt, json, jsonFile].filter(Boolean).length > 1) {
+    fail("只能使用一种输入方式：--prompt、--json 或 --json-file。");
   }
 
   if (prompt) {
@@ -185,7 +245,25 @@ function parseBatchFromArgs(argv: string[]) {
     };
   }
 
-  fail("send 模式必须提供 --prompt 或 --json。");
+  if (jsonFile) {
+    let parsed: FigmaPluginCommandBatch;
+    try {
+      parsed = JSON.parse(await readFile(path.resolve(jsonFile), "utf8")) as FigmaPluginCommandBatch;
+    } catch (error) {
+      fail(error instanceof Error ? `JSON 文件读取失败：${error.message}` : "JSON 文件读取失败。");
+    }
+
+    if (!Array.isArray(parsed.commands) || !parsed.commands.length) {
+      fail("命令 JSON 文件里没有 commands。");
+    }
+
+    return {
+      batch: parsed,
+      composition: null,
+    };
+  }
+
+  fail("send 模式必须提供 --prompt、--json 或 --json-file。");
 }
 
 function printSelection(session: PluginBridgeSession) {
@@ -400,7 +478,7 @@ async function runStatus() {
 async function runSend(argv: string[]) {
   const snapshot = await requestJson<PluginBridgeSnapshot>("/api/plugin-bridge");
   const session = pickSession(snapshot.sessions, readFlag(argv, "--session"));
-  const { batch: rawBatch, composition } = parseBatchFromArgs(argv);
+  const { batch: rawBatch, composition } = await parseBatchFromArgs(argv);
   const nodeIds = parseNodeIds(readFlag(argv, "--node-ids"));
   try {
     ensureExplicitTargetingForMutations(rawBatch, session, nodeIds);
@@ -444,6 +522,19 @@ async function runSend(argv: string[]) {
   printComposition(composition);
   console.log("payload:");
   console.log(JSON.stringify(batch, null, 2));
+
+  if (!argv.includes("--wait")) {
+    return;
+  }
+
+  const timeoutMsRaw = readValueFlag(argv, "--timeout-ms");
+  const timeoutMs = timeoutMsRaw ? Number.parseInt(timeoutMsRaw, 10) : COMMAND_WAIT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    fail(`invalid --timeout-ms: ${timeoutMsRaw}`);
+  }
+  const completedCommand = await waitForQueuedCommand(result.id, timeoutMs);
+  await maybeWriteCommandRecord(completedCommand, readValueFlag(argv, "--result-out"));
+  printCommandResults(completedCommand);
 }
 
 async function runPreview(argv: string[]) {

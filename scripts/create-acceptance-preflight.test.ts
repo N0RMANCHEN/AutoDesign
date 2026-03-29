@@ -123,3 +123,158 @@ test("create_acceptance_preflight rejects when no plugin session is available", 
     );
   });
 });
+
+test("create_acceptance_preflight captures runtime read artifacts for the runtime-read-live scenario", async () => {
+  await withTempRoot(async (tempRoot, fixtureDir) => {
+    await writeFile(
+      path.join(fixtureDir, "get__api__plugin-bridge.json"),
+      JSON.stringify(
+        {
+          sessions: [
+            {
+              id: "session_runtime",
+              label: "AutoDesign",
+              pluginVersion: "0.2.0",
+              editorType: "figma",
+              fileName: "Runtime Read File",
+              pageName: "Runtime",
+              status: "online",
+              lastSeenAt: "2026-03-23T12:30:00.000Z",
+              lastHandshakeAt: "2026-03-23T12:30:00.000Z",
+              runtimeFeatures: { supportsExplicitNodeTargeting: true },
+              capabilities: [{ id: "selection.refresh" }, { id: "nodes.inspect-subtree" }],
+              selection: [
+                {
+                  id: "2:1",
+                  name: "Runtime Hero",
+                  type: "FRAME",
+                  fillable: true,
+                  fills: [],
+                  fillStyleId: null,
+                  previewDataUrl: pngDataUrl("runtime-preview"),
+                },
+              ],
+            },
+          ],
+          commands: [],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "get__api__runtime__bridge-overview.json"),
+      JSON.stringify({
+        sessionCount: 1,
+        onlineSessionCount: 1,
+        staleSessionCount: 0,
+        commandCounts: { queued: 0, claimed: 0, succeeded: 0, failed: 0 },
+        sessions: [],
+        commands: [],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__design-context.json"),
+      JSON.stringify({
+        selectionIds: [],
+        primarySelectionId: null,
+        metadata: [],
+        contextPack: { selectionIds: [], graphKind: "codegraph", action: "codegraph/summarize" },
+        designContext: { sources: [], screens: [], componentMappings: [], reviewItems: [] },
+        variableDefs: { available: true, source: "plugin-session-variable-snapshot", note: "ok", collections: [], colors: [], spacing: [], variables: [] },
+        pluginSelection: {
+          targetSessionId: "session_runtime",
+          primarySelectionNodeId: "2:1",
+          available: true,
+          source: "plugin-selection-summary",
+          note: "ok",
+          selectionNodeIds: ["2:1"],
+          selection: [],
+          dependencies: { resolvedStyles: [], resolvedVariables: [], unresolvedStyleIds: [], unresolvedVariableIds: [] },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__variable-defs.json"),
+      JSON.stringify({
+        selectionIds: [],
+        primarySelectionId: null,
+        variableDefs: { available: true, source: "plugin-session-variable-snapshot", note: "ok", collections: [], colors: ["Colors/primary = #0F172A"], spacing: [], variables: [] },
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__node-metadata.json"),
+      JSON.stringify({
+        targetSessionId: "session_runtime",
+        nodeId: "2:1",
+        available: true,
+        source: "session-selection-summary",
+        note: "using cached selection summary",
+        node: { id: "2:1", name: "Runtime Hero" },
+        subtree: [{ id: "2:1", name: "Runtime Hero" }],
+        resolvedStyleBindings: [],
+        resolvedVariables: [],
+        unresolvedVariableIds: [],
+        subtreeResolvedStyles: [],
+        subtreeResolvedVariables: [],
+        subtreeUnresolvedStyleIds: [],
+        subtreeUnresolvedVariableIds: [],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(fixtureDir, "post__api__runtime__screenshot.json"),
+      JSON.stringify({
+        targetSessionId: "session_runtime",
+        nodeId: "2:1",
+        available: true,
+        source: "session-selection-preview",
+        note: null,
+        screenshot: {
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          dataUrl: pngDataUrl("runtime-screenshot"),
+        },
+        artifactPath: path.join(tempRoot, "reports", "acceptance", "artifacts", "20260323-232000", "runtime-screenshot-runtime-hero.png"),
+      }, null, 2),
+      "utf8",
+    );
+
+    const timestamp = "20260323-232000";
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [scriptPath, "--timestamp", timestamp, "--scenario", "runtime-read-live"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          AUTODESIGN_REPORT_ROOT: tempRoot,
+          AUTODESIGN_API_FIXTURE_DIR: fixtureDir,
+        },
+      },
+    );
+
+    const artifactRoot = path.join(tempRoot, "reports", "acceptance", "artifacts", timestamp);
+    const summary = await readFile(path.join(artifactRoot, "preflight-summary.txt"), "utf8");
+    const designContext = JSON.parse(await readFile(path.join(artifactRoot, "runtime-design-context.json"), "utf8"));
+    const variableDefs = JSON.parse(await readFile(path.join(artifactRoot, "runtime-variable-defs.json"), "utf8"));
+    const nodeMetadata = JSON.parse(await readFile(path.join(artifactRoot, "runtime-node-metadata-runtime-hero.json"), "utf8"));
+    const screenshotJson = JSON.parse(await readFile(path.join(artifactRoot, "runtime-screenshot-runtime-hero.json"), "utf8"));
+    const screenshotPng = await readFile(path.join(artifactRoot, "runtime-screenshot-runtime-hero.png"));
+
+    assert.equal(designContext.pluginSelection.targetSessionId, "session_runtime");
+    assert.deepEqual(variableDefs.variableDefs.colors, ["Colors/primary = #0F172A"]);
+    assert.equal(nodeMetadata.node.id, "2:1");
+    assert.equal(screenshotJson.nodeId, "2:1");
+    assert.equal(screenshotPng.toString("utf8"), "runtime-screenshot");
+    assert.match(summary, /scenario: runtime-read-live/);
+    assert.match(summary, /runtimeReadArtifacts:/);
+    assert.match(summary, /runtime-design-context\.json/);
+    assert.match(stdout, /acceptance preflight created: reports\/acceptance\/artifacts\/20260323-232000\/runtime-design-context\.json/);
+  });
+});

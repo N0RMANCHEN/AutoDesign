@@ -293,3 +293,39 @@ test("getPluginBridgeSnapshot migrates from the legacy bridge file when the new 
     },
   );
 });
+
+test("getPluginBridgeSnapshot marks recent persisted sessions online across fresh imports", async () => {
+  const now = new Date().toISOString();
+  await withTempBridgeStore(
+    async (store) => {
+      const snapshot = await store.getPluginBridgeSnapshot();
+
+      assert.equal(snapshot.sessions.length, 1);
+      assert.equal(snapshot.sessions[0]?.id, "recent-session");
+      assert.equal(snapshot.sessions[0]?.status, "online");
+    },
+    {
+      seedLegacySnapshot: {
+        sessions: [
+          {
+            id: "recent-session",
+            label: "Recent Plugin",
+            pluginVersion: "0.2.3",
+            editorType: "figma",
+            fileName: "Live File",
+            pageName: "Page 1",
+            status: "online",
+            lastSeenAt: now,
+            lastHandshakeAt: now,
+            runtimeFeatures: {
+              supportsExplicitNodeTargeting: true,
+            },
+            capabilities: [],
+            selection: [],
+          },
+        ],
+        commands: [],
+      },
+    },
+  );
+});

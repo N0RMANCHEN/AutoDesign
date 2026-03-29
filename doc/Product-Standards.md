@@ -5,10 +5,11 @@
 
 ## 1. 产品定位
 
-`AutoDesign` 解决两类问题：
+`AutoDesign` 解决三类问题：
 
-1. 让 AI 通过本地插件和 bridge 安全修改 Figma
-2. 让 Figma 里的设计事实更稳定地转成前端改造输入
+1. 让前端代码或运行态页面被采样、规划并还原成可编辑 Figma
+2. 让 AI 通过本地插件和 bridge 安全修改 Figma
+3. 让 Figma 里的设计事实更稳定地转成前端改造输入
 
 它当前不是：
 
@@ -19,7 +20,7 @@
 边界治理：
 
 - Boundary truth source: `config/governance/product_boundary_truth.json`
-- 当前边界摘要：工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。
+- 当前边界摘要：工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。
 
 ## 2. 非协商产品原则
 

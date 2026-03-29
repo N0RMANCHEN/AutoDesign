@@ -1,4 +1,8 @@
-import type { PluginCommandExecutionResult } from "../../../../shared/plugin-bridge.js";
+import type {
+  PluginAvailableFont,
+  PluginCommandExecutionResult,
+  PluginFontLoadProbeResult,
+} from "../../../../shared/plugin-bridge.js";
 import type { FigmaCapabilityCommand } from "../../../../shared/plugin-contract.js";
 
 import {
@@ -38,12 +42,131 @@ type NodeCommandDeps = {
   successResult: SuccessResultFactory;
 };
 
+function normalizeFontCatalogKey(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "");
+}
+
+function buildFontCatalog(fonts: Array<{ fontName?: { family?: string; style?: string } | null }>) {
+  const seen = new Set<string>();
+  const catalog: PluginAvailableFont[] = [];
+  for (const font of fonts) {
+    const family = String(font.fontName?.family || "").trim();
+    const style = String(font.fontName?.style || "").trim();
+    if (!family || !style) {
+      continue;
+    }
+    const familyKey = normalizeFontCatalogKey(family);
+    const styleKey = normalizeFontCatalogKey(style);
+    const key = `${familyKey}::${styleKey}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    catalog.push({
+      family,
+      style,
+      familyKey,
+      styleKey,
+    });
+  }
+  return catalog.sort((left, right) =>
+    `${left.familyKey}::${left.styleKey}`.localeCompare(`${right.familyKey}::${right.styleKey}`),
+  );
+}
+
+function buildFontLoadProbeCatalog(fonts: Array<{ family?: string; style?: string }>) {
+  const seen = new Set<string>();
+  const catalog: Array<{ family: string; style: string; familyKey: string; styleKey: string }> = [];
+  for (const font of fonts) {
+    const family = String(font.family || "").trim();
+    const style = String(font.style || "").trim() || "Regular";
+    if (!family) {
+      continue;
+    }
+    const familyKey = normalizeFontCatalogKey(family);
+    const styleKey = normalizeFontCatalogKey(style);
+    const key = `${familyKey}::${styleKey}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    catalog.push({
+      family,
+      style,
+      familyKey,
+      styleKey,
+    });
+  }
+  return catalog.sort((left, right) =>
+    `${left.familyKey}::${left.styleKey}`.localeCompare(`${right.familyKey}::${right.styleKey}`),
+  );
+}
+
 export async function tryRunNodeCommand(
   command: FigmaCapabilityCommand,
   batchSource: string | undefined,
   deps: NodeCommandDeps,
 ): Promise<PluginCommandExecutionResult | null> {
   switch (command.capabilityId) {
+    case "runtime.inspect-font-catalog": {
+      const catalog = buildFontCatalog(await figma.listAvailableFontsAsync());
+      return deps.successResult(command.capabilityId, `已读取 ${catalog.length} 个可用字体样式。`, {
+        fontCatalog: catalog,
+      });
+    }
+
+    case "runtime.probe-font-load": {
+      const payload = command.payload as {
+        fonts?: Array<{
+          family?: string;
+          style?: string;
+        }>;
+      };
+      const requestedFonts = buildFontLoadProbeCatalog(payload.fonts || []);
+      if (!requestedFonts.length) {
+        throw new Error("probe-font-load 需要至少一个 family/style。");
+      }
+
+      const fontLoadResults: PluginFontLoadProbeResult[] = [];
+      for (const font of requestedFonts) {
+        try {
+          await figma.loadFontAsync({
+            family: font.family,
+            style: font.style,
+          });
+          fontLoadResults.push({
+            family: font.family,
+            style: font.style,
+            familyKey: font.familyKey,
+            styleKey: font.styleKey,
+            ok: true,
+            message: "font load succeeded",
+          });
+        } catch (error) {
+          fontLoadResults.push({
+            family: font.family,
+            style: font.style,
+            familyKey: font.familyKey,
+            styleKey: font.styleKey,
+            ok: false,
+            message: error instanceof Error ? error.message : "font load failed",
+          });
+        }
+      }
+
+      const passed = fontLoadResults.filter((result) => result.ok).length;
+      return deps.successResult(
+        command.capabilityId,
+        `已探测 ${fontLoadResults.length} 个字体样式；成功 ${passed} 个，失败 ${fontLoadResults.length - passed} 个。`,
+        {
+          fontLoadResults,
+        },
+      );
+    }
+
     case "selection.refresh":
       return deps.successResult(command.capabilityId, "已刷新当前 selection。");
 
@@ -482,16 +605,22 @@ export async function tryRunNodeCommand(
     case "layout.configure-frame": {
       const payload = command.payload as {
         layoutMode?: "NONE" | "HORIZONTAL" | "VERTICAL";
+        layoutWrap?: "NO_WRAP" | "WRAP";
         primaryAxisSizingMode?: "FIXED" | "AUTO";
         counterAxisSizingMode?: "FIXED" | "AUTO";
         primaryAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "SPACE_BETWEEN";
         counterAxisAlignItems?: "MIN" | "CENTER" | "MAX" | "BASELINE";
         itemSpacing?: number;
+        counterAxisSpacing?: number;
         paddingLeft?: number;
         paddingRight?: number;
         paddingTop?: number;
         paddingBottom?: number;
         clipsContent?: boolean;
+        minWidth?: number;
+        maxWidth?: number;
+        minHeight?: number;
+        maxHeight?: number;
       };
       const changedNodeIds: string[] = [];
       for (const node of await deps.getTargetNodes(command, batchSource)) {

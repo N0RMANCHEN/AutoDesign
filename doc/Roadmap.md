@@ -1,6 +1,6 @@
 # AutoDesign Roadmap
 
-- 更新日期：2026-03-25
+- 更新日期：2026-03-29
 - 维护规则：本文件只保留当前执行真相，不保留历史流水；已完成事项应移出 active list，并在 `doc/plans/archive/`、`CHANGELOG.md` 或 `reports/` 留痕。
 
 ## 1. 治理规则
@@ -11,14 +11,14 @@
 
 ## 2. 当前执行面板
 
-- `current_focus`: `文档治理体系落地 + design-core 主干迁移 + reconstruction workflow 稳定化 + plugin runtime / bridge CLI 降污 + 测试验收补强 + Figma MCP 对齐取舍`
+- `current_focus`: `文档治理体系落地 + design-core 主干迁移 + reconstruction workflow 稳定化 + plugin runtime / bridge CLI 降污 + 测试验收补强 + Figma MCP 对齐取舍 + code-to-figma 可逆性预检 + code-to-design 运行态采样与计划链`
 - `plugin_runtime`: `active`
 - `workspace_runtime`: `active`
 - `bridge_runtime`: `active`
 - `documentation_governance`: `in_progress`
 - `active_owner_cap`: `1`
-- `delivery_priority`: `R2 架构硬化 -> R3 reconstruction 稳定化 -> R4 测试验收闭环 -> R6 Phase 1 设计事实读层对齐 -> R5 Figma-to-React 上下文收敛`
-- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。
+- `delivery_priority`: `R2 架构硬化 -> R3 reconstruction 稳定化 -> R4 测试验收闭环 -> R6 Phase 1 设计事实读层对齐 -> R5 Figma-to-React 上下文收敛 -> R7 code-to-figma 可逆性预检 -> R8 code-to-design 运行态采样与计划链`
+- `support_boundary`: 工作台上下文整理，以及 `plugin:status` / `plugin:inspect` / `plugin:preview` / `plugin:send` 所代表的 `Plugin API + localhost bridge` 主链为当前正式支持面；`plugin:reconstruct`、Runtime AI 测试台、本地 `Context Pack -> action` 模拟链，以及 `code-to-design:capture` / `code-to-design:plan` 所代表的本地 Code-to-Design 采样与计划链为 experimental；生产级自动 React 生成、MCP 主写回、SaaS 化能力为 future target。
 
 ## 3. Active Work
 
@@ -116,6 +116,35 @@
   - safe write parity 子集在 capability catalog、plugin runtime 和回归测试中闭环
   - 非范围项继续停留在 deferred / future，不回流成当前主线
 
+### R7 Code-to-Figma 可逆性预检
+
+- 状态：`in_progress`
+- 目标：在不引入 code-to-canvas 正式主链的前提下，先定义“桌面端、静态态、可编辑、禁止降级”的源码可逆子集，并为本地项目提供 fail-fast 预检
+- Plan：[code-to-figma-preflight.md](plans/code-to-figma-preflight.md)
+- 当前收口子任务：
+  - 定义 CSS / TSX 的 blocker 与 warning contract，明确哪些源码特性会直接阻断可编辑还原
+  - 补上本地 preflight CLI、结构化输出和退出码，让外部项目能被直接审计
+  - 用文档和治理措辞明确这条链是 feasibility audit，不等于 code-to-canvas 主线
+- 完成判据：
+  - 可逆子集 v1 有明确 contract、脚本入口和测试
+  - 不可逆特性会被显式拦截，不再把“像素级且可编辑”当成空口承诺
+  - preflight 继续只做 feasibility audit，不和 runtime capture / plan 混成一层
+
+### R8 Code-to-Design 运行态采样与计划链
+
+- 状态：`in_progress`
+- 目标：把 `Code -> Design` 从“只会 preflight”推进到“能基于本地浏览器运行态生成可执行 Figma command plan”的实验主链
+- Plan：[code-to-design-runtime-capture.md](plans/code-to-design-runtime-capture.md)
+- 当前收口子任务：
+  - 固定桌面 viewport 下的运行态页面 snapshot contract、capture helper 和本地 CLI
+  - 基于 snapshot 生成 Figma capability batch，覆盖文本、图片、基础 shape 与页面背景
+  - 把 `plugin:send --json-file`、显式 `parentNodeId` targeting 和 create-image / fixed-width text capability 收成稳定主链
+  - 明确 Code-to-Design 与 Direct Figma Design / Design-to-Code 的架构边界，避免再次混层
+- 完成判据：
+  - `code-to-design:capture` 与 `code-to-design:plan` 有明确 contract、脚本入口和单测
+  - AItest 这类静态桌面页面可以在不改目标源码的前提下产出可执行的 Figma batch
+  - Code-to-Design 继续作为 experimental 能力面管理，不冒充“任意 React 一键还原”
+
 ## 4. 当前风险
 
 - 文档治理刚完成重建，后续如不持续维护，仍会重新退化为重复事实和失效入口
@@ -125,6 +154,7 @@
 - 测试标准和报告层已经建立，但自动化验证与真实验收沉淀仍不完整
 - 如不区分“本地等价能力”与“官方 MCP 平台能力”，Roadmap 很容易漂移到 hosted endpoint、FigJam、Make 和 SaaS 方向
 - 如把设计语义推断直接升级成业务逻辑和自动代码生成承诺，Workspace 会从“稳定改造输入”漂移成高风险 codegen 管道
+- 如没有严格的前端可逆子集预检，任何“源码直接还原 Figma 且保持可编辑”承诺都会在复杂 CSS / 交互态上失真
 
 ## 5. Archive Handoff
 
@@ -138,7 +168,7 @@
 - 完整自动化 React 生成流水线
 - remote hosted MCP endpoint / identity / team drafts provisioning
 - FigJam diagram workflow 与 Make 资源链
-- browser / live UI -> Figma 的 code-to-canvas 主链
+- 生产级浏览器自动化、跨断点 code-to-canvas 和交互态还原
 
 ## 7. 维护规则
 

@@ -1,6 +1,7 @@
 import type { PluginBridgeSession } from "./plugin-bridge.js";
 import type { FigmaPluginCommandBatch } from "./plugin-contract.js";
 import {
+  hasExplicitCreationParentTarget,
   normalizeLegacyCommandForExternalDispatch,
   requiresExplicitNodeIdsForExternalCapability,
 } from "./plugin-targeting.js";
@@ -79,6 +80,7 @@ export function ensureExplicitTargetingForMutations(
   const missingExplicitTargets = normalizedCommands.filter(
     (command) =>
       requiresExplicitNodeIdsForExternalCapability(command.capabilityId) &&
+      !hasExplicitCreationParentTarget(command) &&
       (!Array.isArray(command.nodeIds) || command.nodeIds.length === 0),
   );
 
@@ -100,9 +102,11 @@ export function ensureSafeMutationBatch(batch: FigmaPluginCommandBatch) {
     .filter((command) => requiresExplicitNodeIdsForExternalCapability(command.capabilityId))
     .map((command) => {
       const targetIds = Array.isArray(command.nodeIds) ? command.nodeIds.filter(Boolean) : [];
-      return targetIds.join(",");
+      return targetIds;
     })
-    .filter(Boolean);
+    .filter((targetIds) => targetIds.length > 0)
+    .filter((targetIds) => !targetIds.every((targetId) => targetId.startsWith("analysis:")))
+    .map((targetIds) => targetIds.join(","));
 
   if (mutatingTargetSets.length > 1 && new Set(mutatingTargetSets).size > 1) {
     throw new Error("外部修改类命令不能在同一批次里混用多组 nodeIds。请按父级或局部拆成多次 plugin:send。");

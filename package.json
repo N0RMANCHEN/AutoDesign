@@ -34,6 +34,12 @@
     "plugin:preview": "node --import tsx scripts/plugin-bridge-cli.ts preview",
     "plugin:reconstruct": "node --import tsx scripts/plugin-bridge-cli.ts reconstruct",
     "plugin:send": "node --import tsx scripts/plugin-bridge-cli.ts send",
+    "runtime:read": "node --import tsx scripts/runtime-read-cli.ts",
+    "code-to-design:fonts": "node --import tsx scripts/code-to-design-fonts.ts",
+    "code-to-figma:preflight": "node --import tsx scripts/code-to-figma-preflight.ts",
+    "code-to-design:capture": "node --import tsx scripts/code-to-design-capture.ts",
+    "code-to-design:plan": "node --import tsx scripts/code-to-design-plan.ts",
+    "code-to-design:acceptance": "node --import tsx scripts/code-to-design-acceptance.ts",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json"
   },

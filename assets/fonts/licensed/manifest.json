@@ -1,0 +1,92 @@
+{
+  "kind": "code_to_design_font_manifest",
+  "version": "v1",
+  "fonts": [
+    {
+      "family": "Didot",
+      "style": "Regular",
+      "postscriptName": "Didot",
+      "file": "didot/Didot.ttf",
+      "sha256": "f7fba73810df15a6ca2e04d71bacf537d1e88d87f15fc60afb3b1b853284bb9e",
+      "figmaFamily": "Didot",
+      "figmaStyle": "Regular",
+      "styleAliases": [
+        "Regular"
+      ]
+    },
+    {
+      "family": "Didot",
+      "style": "Semibold",
+      "postscriptName": "Didot-Bold",
+      "file": "didot/Didot-Bold.ttf",
+      "sha256": "f69289e0c96dfbdc0fdfa77775f57e91e7715169b6a37cc825ad9b92131b9086",
+      "figmaFamily": "Didot",
+      "figmaStyle": "Bold",
+      "styleAliases": [
+        "Semibold",
+        "Bold"
+      ]
+    },
+    {
+      "family": "Iowan Old Style",
+      "style": "Bold",
+      "postscriptName": "IowanOldStyle-Bold",
+      "file": "iowan-old-style/IowanOldStyle-Bold.ttf",
+      "sha256": "fe372a7bcec5b0158db5ae4f08f9777feff1598417239ce1777e8b0d33a09325",
+      "figmaFamily": "Iowan Old Style",
+      "figmaStyle": "Bold",
+      "styleAliases": [
+        "Bold"
+      ]
+    },
+    {
+      "family": "Iowan Old Style",
+      "style": "Regular",
+      "postscriptName": "IowanOldStyle-Roman",
+      "file": "iowan-old-style/IowanOldStyle-Roman.ttf",
+      "sha256": "aaf33597026558cabd6b8d5fe91d320e4d68cb9a04ac08d3649803d693154e23",
+      "figmaFamily": "Iowan Old Style",
+      "figmaStyle": "Roman",
+      "styleAliases": [
+        "Regular",
+        "Roman"
+      ]
+    },
+    {
+      "family": "SF Pro Display",
+      "style": "Bold",
+      "postscriptName": "SFProDisplay-Bold",
+      "file": "sf-pro-display/SF-Pro-Display-Bold.otf",
+      "sha256": "121f1344e8eadbae15830a76d7d4bf09a7ce03dce23957334b02f6767f34ddd5",
+      "figmaFamily": "SF Pro Display",
+      "figmaStyle": "Bold",
+      "styleAliases": [
+        "Bold"
+      ]
+    },
+    {
+      "family": "SF Pro Display",
+      "style": "Regular",
+      "postscriptName": "SFProDisplay-Regular",
+      "file": "sf-pro-display/SF-Pro-Display-Regular.otf",
+      "sha256": "fa201942bfbbad09b0be750686a747d490901b3bc4618ecdfc30382cf28d4704",
+      "figmaFamily": "SF Pro Display",
+      "figmaStyle": "Regular",
+      "styleAliases": [
+        "Regular"
+      ]
+    },
+    {
+      "family": "SF Pro Display",
+      "style": "Semibold",
+      "postscriptName": "SFProDisplay-Semibold",
+      "file": "sf-pro-display/SF-Pro-Display-Semibold.otf",
+      "sha256": "ef94ac2356af4938fc96c35af41cc9e5788b9f2ff9b16561a800a4d6875c2cff",
+      "figmaFamily": "SF Pro Display",
+      "figmaStyle": "Semibold",
+      "styleAliases": [
+        "Semibold"
+      ]
+    }
+  ]
+}

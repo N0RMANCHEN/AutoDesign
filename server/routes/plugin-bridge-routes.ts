@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   InspectFrameRequestPayload,
   InspectFrameResponsePayload,
+  PluginBridgeSyncResponse,
   PluginCommandResultPayload,
   PluginSessionRegistrationPayload,
   QueuePluginCommandPayload,
@@ -30,6 +31,14 @@ async function handlePluginSessionRegister(
 ) {
   const payload = await readBody<PluginSessionRegistrationPayload>(request);
   const session = await registerPluginSession(payload);
+  if (payload.claimCommand) {
+    const syncResponse: PluginBridgeSyncResponse = {
+      session,
+      command: await claimNextPluginCommand(session.id),
+    };
+    sendJson(response, 200, syncResponse);
+    return;
+  }
   sendJson(response, 200, session);
 }
 
@@ -43,6 +52,15 @@ async function handlePluginSessionHeartbeat(
 
   if (!session) {
     sendJson(response, 404, { ok: false, error: "Plugin session not found" });
+    return;
+  }
+
+  if (payload.claimCommand) {
+    const syncResponse: PluginBridgeSyncResponse = {
+      session,
+      command: await claimNextPluginCommand(session.id),
+    };
+    sendJson(response, 200, syncResponse);
     return;
   }
 
